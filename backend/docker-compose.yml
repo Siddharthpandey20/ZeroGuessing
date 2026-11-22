@@ -1,0 +1,30 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: zeroguess
+      POSTGRES_PASSWORD: zeroguess
+      POSTGRES_DB: zeroguess
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeroguess"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: .
+    profiles: ["full"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://zeroguess:zeroguess@db:5432/zeroguess
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
