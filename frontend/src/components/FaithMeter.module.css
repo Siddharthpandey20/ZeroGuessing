@@ -1,0 +1,11 @@
+/* Hallmark · theme: custom · a module of the ZeroGuess system; the full stamp is line 1 of src/styles/global.css */
+.meter { display: grid; gap: var(--space-xs); }
+.figure { display: flex; align-items: baseline; gap: var(--space-sm); }
+.pct { font-size: var(--text-2xl); line-height: 1; color: var(--color-ink); }
+.meter[data-compact] .pct { font-size: var(--text-lg); }
+.caption { font-size: var(--text-xs); color: var(--color-ink-2); }
+.track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; height: 6px; }
+.seg { border-radius: 2px; background: var(--color-paper-3); transition: background-color var(--dur-long) var(--ease-out); }
+.seg[data-tone="supported"] { background: var(--color-accent-2); }
+.seg[data-tone="conflicted"] { background: var(--color-conflict); }
+.seg[data-tone="unsupported"], .seg[data-tone="contradicted"] { background: var(--color-blocked); opacity: 0.75; }

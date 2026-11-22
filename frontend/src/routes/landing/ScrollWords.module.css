@@ -1,0 +1,23 @@
+/* Hallmark · theme: custom · a module of the ZeroGuess system; the full stamp is line 1 of src/styles/global.css */
+.wrap { position: relative; height: 240vh; }
+.sticky { position: sticky; top: 0; height: 100vh; display: grid; align-items: center; }
+.inner { width: 100%; max-width: var(--container); margin-inline: auto; padding: 0 var(--gutter); display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gap-columns); }
+.index { grid-column: 1 / span 2; font-size: var(--text-sm); color: var(--color-muted); padding-top: 0.9em; }
+.text { grid-column: 3 / span 10; font-size: clamp(2rem, 4.2vw, 4.4rem); font-weight: 520; line-height: 1.08; letter-spacing: -0.035em; max-width: none; }
+.word { color: color-mix(in oklab, var(--color-ink) calc(var(--k) * 100%), var(--color-ink-a14)); transition: color 120ms linear; }
+.word[data-mark][data-lit] {
+  background-image: linear-gradient(var(--color-accent), var(--color-accent)); background-repeat: no-repeat; background-position: 0 62%; background-size: 100% 80%;
+  color: var(--color-accent-ink); box-decoration-break: clone; -webkit-box-decoration-break: clone; padding: 0 0.08em; margin: 0 -0.08em; border-radius: 4px;
+  animation: markIn 600ms var(--ease-out) both;
+}
+@keyframes markIn { from { background-size: 0% 80%; } }
+@media (max-width: 60rem) {
+  .index { display: none; }
+  .text { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wrap { height: auto; }
+  .sticky { position: static; height: auto; padding: var(--section-gap-s) 0; }
+  .word { color: var(--color-ink); }
+  .word[data-mark] { animation: none; }
+}

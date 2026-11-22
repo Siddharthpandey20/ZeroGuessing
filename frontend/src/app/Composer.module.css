@@ -1,0 +1,30 @@
+/* Hallmark · theme: custom · a module of the ZeroGuess system; the full stamp is line 1 of src/styles/global.css */
+.box {
+  display: grid; gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-sm) var(--space-xs) var(--space-md);
+  background: var(--color-paper-2);
+  border: var(--rule-hair) solid var(--color-rule-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--dur-short) var(--ease-out), box-shadow var(--dur-short) var(--ease-out);
+}
+.box:focus-within { border-color: var(--color-ink-2); box-shadow: 0 0 0 3px var(--color-focus-a12), var(--shadow-card); }
+.box[data-compact] { box-shadow: none; }
+.input {
+  width: 100%; resize: none; border: 0; outline: 0; background: transparent;
+  padding: var(--space-xs) var(--space-xs) var(--space-2xs) 0;
+  font-size: 1.0625rem; line-height: 1.5; color: var(--color-ink);
+  min-height: 2.6em;
+}
+.input::placeholder { color: var(--color-muted); }
+.note { font-size: var(--text-xs); color: var(--color-ink-2); }
+.bar { display: flex; align-items: center; gap: var(--space-2xs); }
+.spacer { flex: 1; }
+.date { display: inline-flex; align-items: center; gap: var(--space-xs); height: 30px; padding: 0 4px 0 12px; border-radius: var(--radius-pill); background: var(--color-paper-3); font-size: var(--text-xs); color: var(--color-ink-2); }
+.date input { border: 0; background: transparent; color: var(--color-ink); font-size: var(--text-xs); font-weight: 560; height: 26px; padding: 0 8px; border-radius: var(--radius-pill); }
+.date input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 0; }
+.send { padding: 0 var(--space-sm) 0 var(--space-md); }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+@media (max-width: 30rem) { .date span { display: none; } }

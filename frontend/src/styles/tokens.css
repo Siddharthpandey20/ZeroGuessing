@@ -1,0 +1,130 @@
+:root {
+  /* spacing, a 4px rhythm */
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px; --space-3xl: 96px; --space-4xl: 144px;
+
+  /* type: app scale at 1.2; landing display set large and tight, after wembi */
+  --text-2xs: 0.75rem; --text-xs: 0.8125rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem; --text-3xl: 2.0736rem;
+  --text-display-s: clamp(2.5rem, 4.4vw + 0.5rem, 4.75rem);
+  --text-display: clamp(3rem, 6.4vw + 0.5rem, 7.5rem);
+  --text-section: clamp(2.25rem, 3.6vw + 0.75rem, 5rem);
+  --text-title: clamp(1.25rem, 0.75vw + 0.875rem, 1.625rem);
+  --text-lead: clamp(1.125rem, 0.4vw + 1rem, 1.375rem);
+  --tracking-display: -0.045em; --tracking-title: -0.02em;
+  --leading-display: 0.94;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 520ms;
+
+  --container: 1440px; --gutter: 56px; --gap-columns: 32px; --section-gap-s: 120px; --section-gap: 160px; --section-gap-l: 200px;
+  --measure: 46rem;
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
+
+  /* ground: echo's misty slate, lifted for reading */
+  --color-paper: oklch(95.6% 0.006 225);
+  --color-paper-2: oklch(98.6% 0.003 95);   /* sheets: answers and PDF pages, wembi's warm white */
+  --color-paper-3: oklch(92.4% 0.011 225);  /* panels, rails, sunken wells */
+  --color-haze: oklch(80% 0.019 224);       /* the atmosphere band, echo's #a8b6bd */
+  --color-haze-2: oklch(71% 0.026 224);
+
+  /* ink: echo's deep teal */
+  --color-ink: oklch(30% 0.047 224);
+  --color-ink-2: oklch(41% 0.036 224);
+  --color-muted: oklch(50% 0.024 224);
+  --color-rule: oklch(30% 0.047 224 / 0.16);
+  --color-rule-strong: oklch(30% 0.047 224 / 0.34);
+
+  /* the proof mark: wembi's lime, used only for what has passed verification and the primary action */
+  --color-accent: oklch(92.5% 0.175 131);
+  --color-accent-2: oklch(86% 0.2 133);
+  --color-accent-ink: oklch(30% 0.047 224);
+  --color-focus: oklch(48% 0.14 236);
+
+  /* verdict colours */
+  --color-conflict: oklch(87% 0.12 78);
+  --color-conflict-ink: oklch(44% 0.1 62);
+  --color-blocked: oklch(54% 0.18 27);
+  --color-blocked-soft: oklch(54% 0.18 27 / 0.1);
+  --color-pending: oklch(54% 0.09 262);
+  --color-error: oklch(52% 0.19 27); --color-success: oklch(50% 0.12 150);
+
+  /* faces: Onest for everything read, Tektur for the wordmark and the verification readout */
+  --font-display: "Onest Variable", "Noto Sans Devanagari Variable", ui-sans-serif, sans-serif;
+  --font-body: "Onest Variable", "Noto Sans Devanagari Variable", ui-sans-serif, sans-serif;
+  --font-outlier: "Tektur Variable", "Onest Variable", ui-sans-serif, sans-serif;
+
+  --radius-chip: 8px; --radius-card: 14px; --radius-panel: 22px; --radius-pill: 999px; --rule-hair: 1px;
+  --shadow-card: 0 1px 0 oklch(30% 0.047 224 / 0.06), 0 12px 32px -18px oklch(30% 0.047 224 / 0.28);
+  --shadow-float: 0 2px 0 oklch(30% 0.047 224 / 0.05), 0 24px 60px -24px oklch(30% 0.047 224 / 0.45);
+
+  /* alpha steps and one-offs, so no colour literal lives outside this block */
+  --color-ink-a05: oklch(30% 0.047 224 / 0.05);
+  --color-ink-a06: oklch(30% 0.047 224 / 0.06);
+  --color-ink-a07: oklch(30% 0.047 224 / 0.07);
+  --color-ink-a12: oklch(30% 0.047 224 / 0.12);
+  --color-ink-a14: oklch(30% 0.047 224 / 0.14);
+  --color-ink-a30: oklch(30% 0.047 224 / 0.3);
+  --color-ink-a32: oklch(30% 0.047 224 / 0.32);
+  --color-focus-a18: oklch(48% 0.14 236 / 0.18);
+  --color-focus-a12: oklch(48% 0.14 236 / 0.12);
+  --color-paper-2-a35: oklch(98.6% 0.003 95 / 0.35);
+  --color-paper-2-a60: oklch(98.6% 0.003 95 / 0.6);
+  --color-paper-2-a90: oklch(98.6% 0.003 95 / 0.9);
+  --color-white-a60: oklch(100% 0 0 / 0.6);
+  --color-paper-shine: oklch(95% 0.008 225);
+  --color-paper-a86: oklch(95.6% 0.006 225 / 0.86);
+  --color-pending-a12: oklch(54% 0.09 262 / 0.12);
+  --color-conflict-a32: oklch(87% 0.12 78 / 0.32);
+  --color-conflict-ink-a25: oklch(44% 0.1 62 / 0.25);
+  --color-paper-3-a50: oklch(92.4% 0.011 225 / 0.5);
+  --color-blocked-deep: oklch(48% 0.18 27);
+  --color-mask: var(--color-ink);
+
+  /* fixed daylight values for the rendered-mist panels (hero, checks band), the same in both themes */
+  --color-ink-on-haze: oklch(30% 0.047 224);
+  --color-ink-2-on-haze: oklch(38% 0.04 224);
+  --color-ink-on-haze-a30: oklch(30% 0.047 224 / 0.3);
+  --color-ink-on-haze-a14: oklch(30% 0.047 224 / 0.14);
+  --color-paper-on-haze: oklch(98.6% 0.003 95);
+  --color-paper-3-on-haze: oklch(92.4% 0.011 225);
+  --color-haze-on: oklch(80% 0.019 224);
+  --color-haze-2-on: oklch(71% 0.026 224);
+  --color-paper-2-a60-on: oklch(98.6% 0.003 95 / 0.6);
+  --color-paper-2-a35-on: oklch(98.6% 0.003 95 / 0.35);
+}
+
+/* santalarch's "invert colour": the same system at night. Lime keeps dark ink on it, so marks stay readable. */
+:root[data-theme="dark"] {
+  --color-paper: oklch(19% 0.014 226);
+  --color-paper-2: oklch(23% 0.016 226);
+  --color-paper-3: oklch(16% 0.012 226);
+  --color-haze: oklch(34% 0.024 224);
+  --color-haze-2: oklch(22% 0.02 224);
+  --color-ink: oklch(94% 0.008 220);
+  --color-ink-2: oklch(80% 0.014 222);
+  --color-muted: oklch(68% 0.018 222);
+  --color-rule: oklch(94% 0.008 220 / 0.13);
+  --color-rule-strong: oklch(94% 0.008 220 / 0.26);
+  --color-accent-ink: oklch(24% 0.04 224);
+  --color-focus: oklch(78% 0.12 236);
+  --color-conflict-ink: oklch(84% 0.12 78);
+  --color-blocked: oklch(68% 0.17 27);
+  --color-blocked-soft: oklch(68% 0.17 27 / 0.16);
+  --color-ink-a05: oklch(94% 0.008 220 / 0.05);
+  --color-ink-a06: oklch(94% 0.008 220 / 0.06);
+  --color-ink-a07: oklch(94% 0.008 220 / 0.08);
+  --color-ink-a12: oklch(94% 0.008 220 / 0.12);
+  --color-ink-a14: oklch(94% 0.008 220 / 0.14);
+  --color-ink-a30: oklch(94% 0.008 220 / 0.3);
+  --color-ink-a32: oklch(10% 0.01 226 / 0.6);
+  --color-paper-2-a35: oklch(23% 0.016 226 / 0.35);
+  --color-paper-2-a60: oklch(23% 0.016 226 / 0.6);
+  --color-paper-2-a90: oklch(23% 0.016 226 / 0.9);
+  --color-white-a60: oklch(100% 0 0 / 0.08);
+  --color-paper-shine: oklch(26% 0.016 226);
+  --color-paper-a86: oklch(19% 0.014 226 / 0.86);
+  --color-paper-3-a50: oklch(16% 0.012 226 / 0.5);
+  --color-mask: oklch(0% 0 0);
+  --shadow-card: 0 1px 0 oklch(0% 0 0 / 0.3), 0 12px 32px -18px oklch(0% 0 0 / 0.6);
+  --shadow-float: 0 2px 0 oklch(0% 0 0 / 0.3), 0 24px 60px -24px oklch(0% 0 0 / 0.75);
+  color-scheme: dark;
+}

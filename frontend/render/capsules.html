@@ -1,0 +1,107 @@
+<!doctype html>
+<!-- Offline render scene (not shipped): sentences fall through a verification line; proven ones turn lime,
+     blocked ones turn red and shrink away. Seamless: each column travels exactly its own length per loop. -->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>html,body{margin:0;background:#a8b6bd;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+
+const q = new URLSearchParams(location.search)
+const W = +(q.get('w') || 1920), H = +(q.get('h') || 1080), T = +(q.get('T') || 10)
+const TAU = Math.PI * 2
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+renderer.setPixelRatio(1); renderer.setSize(W, H)
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05
+renderer.outputColorSpace = THREE.SRGBColorSpace
+document.body.appendChild(renderer.domElement)
+
+const scene = new THREE.Scene()
+{
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256
+  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 256)
+  gr.addColorStop(0, '#c9d3d8'); gr.addColorStop(1, '#93a5ae')
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 256)
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; scene.background = t
+}
+scene.fog = new THREE.Fog(new THREE.Color('#aab8bf'), 10, 26)
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.03).texture
+const key = new THREE.DirectionalLight('#ffffff', 2.6); key.position.set(3, 8, 6); scene.add(key)
+scene.add(new THREE.AmbientLight('#e4ecef', 0.7))
+
+let seed = 11
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+
+const NEUTRAL = new THREE.Color('#e9f0f2'), LIME = new THREE.Color('#a6f25c'), RED = new THREE.Color('#d9534a')
+const COLS = 17, PER = 9, SP = 1.05, L = PER * SP, LINE_Y = -0.4
+const items = []
+for (let c = 0; c < COLS; c++) {
+  const x = (c - (COLS - 1) / 2) * 0.82
+  const z = -Math.abs(c - (COLS - 1) / 2) * 0.22 + (rnd() - 0.5) * 0.6
+  const off = rnd() * L
+  for (let k = 0; k < PER; k++) {
+    const len = 0.25 + rnd() * 0.55
+    const geo = new THREE.CapsuleGeometry(0.11, len, 6, 16)
+    const mat = new THREE.MeshPhysicalMaterial({ color: NEUTRAL.clone(), roughness: 0.12, transmission: 0.55, thickness: 0.4, ior: 1.45, clearcoat: 1, clearcoatRoughness: 0.1, emissive: new THREE.Color('#000000') })
+    const m = new THREE.Mesh(geo, mat)
+    const verdict = rnd() < 0.78 ? 'proof' : 'blocked'
+    m.userData = { x, z, base: k * SP + off, verdict, len }
+    scene.add(m); items.push(m)
+  }
+}
+// the verification line: a thin bright band with a soft lime halo
+const line = new THREE.Mesh(new THREE.PlaneGeometry(40, 0.03), new THREE.MeshBasicMaterial({ color: '#f6fff0', toneMapped: false }))
+line.position.set(0, LINE_Y, 0.6); scene.add(line)
+const haloTex = (() => {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 128
+  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 128)
+  gr.addColorStop(0, 'rgba(195,255,143,0)'); gr.addColorStop(0.5, 'rgba(195,255,143,0.28)'); gr.addColorStop(1, 'rgba(195,255,143,0)')
+  g.fillStyle = gr; g.fillRect(0, 0, 4, 128); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t
+})()
+const halo = new THREE.Mesh(new THREE.PlaneGeometry(40, 0.9), new THREE.MeshBasicMaterial({ map: haloTex, transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }))
+halo.position.set(0, LINE_Y, 0.55); scene.add(halo)
+
+const camera = new THREE.PerspectiveCamera(36, W / H, 0.1, 100)
+const tmp = new THREE.Color()
+
+window.renderAt = (t) => {
+  const p = (t % T) / T
+  for (const m of items) {
+    const u = m.userData
+    // falls downward; wraps every L, and travels exactly L per loop
+    const yy = ((u.base - p * L) % L + L) % L
+    const y = yy - L / 2 + 1.2
+    m.position.set(u.x, y, u.z)
+    const past = THREE.MathUtils.smoothstep(LINE_Y - y, -0.05, 0.35) // 0 above the line, 1 once through it
+    const mat = m.material
+    if (u.verdict === 'proof') {
+      tmp.copy(NEUTRAL).lerp(LIME, past); mat.color.copy(tmp); mat.transmission = 0.55 * (1 - past)
+      mat.emissive.copy(LIME).multiplyScalar(0.08 * past)
+      m.scale.setScalar(1)
+    } else {
+      tmp.copy(NEUTRAL).lerp(RED, past); mat.color.copy(tmp); mat.transmission = 0.55 * (1 - past)
+      mat.emissive.setRGB(0, 0, 0)
+      const shrink = 1 - 0.75 * THREE.MathUtils.smoothstep(LINE_Y - y, 0.3, 1.6)
+      m.scale.set(shrink, shrink, shrink)
+    }
+    // fade in at the top and out at the bottom so the wrap is invisible
+    const edge = Math.min(THREE.MathUtils.smoothstep(yy, 0, 0.9), THREE.MathUtils.smoothstep(L - yy, 0, 0.9))
+    m.visible = edge > 0.02
+    m.scale.multiplyScalar(0.4 + 0.6 * edge)
+  }
+  halo.material.opacity = 0.8 + 0.2 * Math.sin(TAU * p * 2)
+  camera.position.set(Math.sin(TAU * p) * 0.4, -1.6, 9.2)
+  camera.lookAt(0, 0.2, 0)
+  renderer.render(scene, camera)
+}
+window.renderAt(0)
+window.__ready = true
+</script>
+</body>
+</html>
