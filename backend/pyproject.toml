@@ -19,6 +19,11 @@ dependencies = [
     "sse-starlette>=2.1",
     "tenacity>=9.0",
     "numpy>=2.0",
+    "pyjwt>=2.15.1",
+    "google-auth>=2.63.1",
+    "requests>=2.34.2",
+    "argon2-cffi>=25.1.0",
+    "email-validator>=2.4.0",
 ]
 
 [project.optional-dependencies]

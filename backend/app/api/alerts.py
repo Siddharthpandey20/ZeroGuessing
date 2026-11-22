@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.contradictions import alert_view, scan_document
 from app.db import SessionLocal, get_session
 from app.models import Contradiction, Document
+from app.security import require_admin
 
 router = APIRouter(tags=["alerts"])
 
@@ -23,13 +24,13 @@ async def _scan_all() -> None:
             await scan_document(session, d.id)
 
 
-@router.post("/alerts/scan", status_code=202)
+@router.post("/alerts/scan", status_code=202, dependencies=[Depends(require_admin)])
 async def rescan(bg: BackgroundTasks):
     bg.add_task(_scan_all)
     return {"status": "scanning"}
 
 
-@router.delete("/alerts/{alert_id}", status_code=204)
+@router.delete("/alerts/{alert_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def dismiss(alert_id: str, session: AsyncSession = Depends(get_session)):
     c = await session.get(Contradiction, alert_id)
     if c:

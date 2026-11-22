@@ -3,6 +3,8 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from app.security import require_admin
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +60,7 @@ async def list_amendments(status: str | None = None, session: AsyncSession = Dep
     return [_out(a, titles) for a in (await session.execute(q)).scalars()]
 
 
-@router.post("/amendments", status_code=201)
+@router.post("/amendments", status_code=201, dependencies=[Depends(require_admin)])
 async def add_amendment(body: AmendmentIn, session: AsyncSession = Depends(get_session)):
     src = await session.get(Document, body.source_doc_id)
     tgt = await session.get(Document, body.target_doc_id)
@@ -75,7 +77,7 @@ async def add_amendment(body: AmendmentIn, session: AsyncSession = Depends(get_s
     return _out(a, await _titles(session))
 
 
-@router.patch("/amendments/{amend_id}")
+@router.patch("/amendments/{amend_id}", dependencies=[Depends(require_admin)])
 async def patch_amendment(amend_id: str, body: AmendmentPatch, session: AsyncSession = Depends(get_session)):
     a = await session.get(Amendment, amend_id)
     if a is None:

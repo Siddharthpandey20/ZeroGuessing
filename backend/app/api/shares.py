@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.render import render_crop
 from app.db import get_session
 from app.models import Chat, Document, Message, Sentence, Share
+from app.security import Principal, get_principal
 from app.storage import get_storage
 
 router = APIRouter(tags=["shares"])
@@ -42,9 +43,10 @@ async def _crops(session: AsyncSession, answers: list[dict]) -> dict[str, str]:
 
 
 @router.post("/chats/{chat_id}/shares", status_code=201)
-async def create_share(chat_id: str, body: ShareIn, session: AsyncSession = Depends(get_session)):
+async def create_share(chat_id: str, body: ShareIn, p: Principal = Depends(get_principal),
+                       session: AsyncSession = Depends(get_session)):
     chat = await session.get(Chat, chat_id)
-    if chat is None:
+    if chat is None or (p.kind == "user" and chat.user_id != p.user_id):
         raise HTTPException(404, "chat not found")
     q = select(Message).where(Message.chat_id == chat_id, Message.status == "done").order_by(Message.turn, Message.version)
     if body.turn is not None:
@@ -71,16 +73,20 @@ async def create_share(chat_id: str, body: ShareIn, session: AsyncSession = Depe
 
 
 @router.get("/chats/{chat_id}/shares")
-async def list_shares(chat_id: str, session: AsyncSession = Depends(get_session)):
+async def list_shares(chat_id: str, p: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)):
+    chat = await session.get(Chat, chat_id)
+    if chat is None or (p.kind == "user" and chat.user_id != p.user_id):
+        raise HTTPException(404, "chat not found")
     rows = (await session.execute(select(Share).where(Share.chat_id == chat_id).order_by(Share.created_at.desc()))).scalars()
     return [{"token": s.token, "created_at": s.created_at, "expires_at": s.expires_at, "revoked": s.revoked,
              "view_count": s.view_count} for s in rows]
 
 
 @router.delete("/shares/{token}", status_code=204)
-async def revoke(token: str, session: AsyncSession = Depends(get_session)):
+async def revoke(token: str, p: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)):
     s = await session.get(Share, token)
-    if s:
+    chat = await session.get(Chat, s.chat_id) if s else None
+    if s and chat and (p.kind != "user" or chat.user_id == p.user_id):
         s.revoked = True
         await session.commit()
 

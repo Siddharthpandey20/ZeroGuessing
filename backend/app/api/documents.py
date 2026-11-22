@@ -12,6 +12,7 @@ from app.core.render import render_crop, render_page
 from app.db import get_session
 from app.ingest.pipeline import DuplicateDocument, create_document, run_ingest
 from app.models import Amendment, Clause, Contradiction, Document, Job, Sentence
+from app.security import require_admin
 from app.storage import get_storage
 
 router = APIRouter(tags=["documents"])
@@ -58,7 +59,7 @@ class DocumentPatch(BaseModel):
     active: bool | None = None
 
 
-@router.post("/documents", response_model=list[UploadResult], status_code=202)
+@router.post("/documents", response_model=list[UploadResult], status_code=202, dependencies=[Depends(require_admin)])
 async def upload_documents(
     bg: BackgroundTasks, files: list[UploadFile] = File(...), session: AsyncSession = Depends(get_session)
 ):
@@ -139,7 +140,7 @@ async def get_document(doc_id: str, session: AsyncSession = Depends(get_session)
     }
 
 
-@router.patch("/documents/{doc_id}", response_model=DocumentOut)
+@router.patch("/documents/{doc_id}", response_model=DocumentOut, dependencies=[Depends(require_admin)])
 async def patch_document(doc_id: str, patch: DocumentPatch, session: AsyncSession = Depends(get_session)):
     doc = await _get_doc(session, doc_id)
     for k, v in patch.model_dump(exclude_unset=True).items():
@@ -148,7 +149,7 @@ async def patch_document(doc_id: str, patch: DocumentPatch, session: AsyncSessio
     return DocumentOut.model_validate(doc)
 
 
-@router.post("/documents/{doc_id}/reingest", status_code=202)
+@router.post("/documents/{doc_id}/reingest", status_code=202, dependencies=[Depends(require_admin)])
 async def reingest(doc_id: str, bg: BackgroundTasks, session: AsyncSession = Depends(get_session)):
     doc = await _get_doc(session, doc_id)
     job = Job(kind="ingest", document_id=doc.id)

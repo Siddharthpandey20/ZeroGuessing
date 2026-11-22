@@ -18,10 +18,11 @@ Plan: `docs/RESEARCH_AND_PLAN.md`, Section L (current). Backend docs: `backend/R
 | 10 | Chats with versions (edit/resend/regenerate); shares (snapshot, revoke, expiry, HTML export) | ✅ | `app/api/chats.py`, `app/api/shares.py` |
 | 10b | Camera: photo → editable text; "check this clause" | ✅ | `app/api/camera.py` |
 | 11 | Demo corpus (7 PDFs) + facts sheet + 36-question gold set + eval script | ✅ built, ⏳ **eval not yet run (needs key)** | `scripts/build_corpus.py`, `corpus/FACTS.md`, `eval/gold.jsonl`, `scripts/run_eval.py` |
+| 13 | Auth: Google sign-in + email/password → JWT access (Bearer or HttpOnly cookie) + rotating refresh; roles admin/viewer; per-user chats; admin user management; API key kept for scripts | ✅ | `app/security.py`, `app/api/auth.py`, `tests/test_auth.py` |
 | 12 | Dockerfile, deploy notes, README | ✅ image builds (`zeroguess-api`, 2.06 GB; slimming is optional) | `Dockerfile`, `README.md` |
 
 ## Verified
-- `uv run pytest -q`: **27 passed**.
+- `uv run pytest -q`: **30 passed** (adds 3 auth tests: login, refresh rotation and reuse detection, roles, account disabling, Google sign-in with admin promotion, domain restriction, chat isolation, cookie-only auth).
   - Normaliser: 22.
   - Parser: 2.
   - Library API: 2.
@@ -55,4 +56,5 @@ Plan: `docs/RESEARCH_AND_PLAN.md`, Section L (current). Backend docs: `backend/R
 - **2026-11-23:** Edit and resend keeps later turns, because each answer depends only on the documents.
 - **2026-11-23:** HTML share export is at `/public/shares/{token}/html` (avoids a route clash).
 - **Known gaps:** no Alembic yet; Cloud Run needs `--no-cpu-throttling`; one Story page-break row in Schedule I is kept as plain text; single API key, not user accounts.
-- **Git:** nothing committed yet.
+- **2026-11-23:** Merged with the frontend session's admin-key cookie (`/auth/session`) and `LLM_PROVIDER=fake`; both still work. Explicit headers take priority over cookies.
+- **Git:** b34d77c backend; auth committed separately (frontend/ not included, owned by the frontend session).

@@ -14,8 +14,22 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 60.0
 
     database_url: str = "postgresql+asyncpg://zeroguess:zeroguess@localhost:5433/zeroguess"
-    api_key: str = "change-me"
+    api_key: str = "change-me"  # service/script access (X-API-Key, or the /auth/session cookie); acts as admin
+    llm_provider: str = "gemini"  # gemini | fake (dev only: deterministic stand-in from tests/fake_llm.py, no key needed)
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
+
+    # auth (JWT access token in Authorization header + rotating refresh token in an httpOnly cookie)
+    jwt_secret: str = "dev-only-change-me-to-a-long-random-string"
+    access_ttl_min: int = 30
+    refresh_ttl_days: int = 14
+    google_client_id: str = ""  # OAuth 2.0 Web client ID from Google Cloud console
+    admin_emails: str = ""  # comma-separated; these users get role=admin on first sign-in
+    allowed_email_domains: str = ""  # comma-separated; empty = any verified Google account
+    allow_password_login: bool = True
+    seed_admin_email: str = ""
+    seed_admin_password: str = ""
+    cookie_secure: bool = False  # True in production (HTTPS)
+    cookie_samesite: str = "lax"  # "none" if frontend and API are on different sites (requires secure)
 
     storage_backend: str = "local"  # local | gcs
     storage_dir: str = "./data/files"
@@ -34,6 +48,14 @@ class Settings(BaseSettings):
     @property
     def fallback_models(self) -> list[str]:
         return [m.strip() for m in self.gemini_fallback_models.split(",") if m.strip()]
+
+    @property
+    def admin_list(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
+    @property
+    def domain_list(self) -> set[str]:
+        return {d.strip().lower().lstrip("@") for d in self.allowed_email_domains.split(",") if d.strip()}
 
     @property
     def cors_list(self) -> list[str]:

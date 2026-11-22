@@ -54,7 +54,23 @@ uv run python -m scripts.run_eval --key change-me --ingest   # upload corpus + s
 ```
 Tests (fake LLM, needs the compose DB): `docker compose exec db psql -U zeroguess -c "CREATE DATABASE zeroguess_test"` once, then `uv run pytest -q`.
 
-## API (all `/api/*` need header `X-API-Key`)
+## Auth
+| Who | How | Role |
+|---|---|---|
+| Browser user | **Sign in with Google**: the frontend gets a Google ID token from Google Identity Services and calls `POST /api/auth/google {"credential": "<id token>"}`. The backend checks the signature, audience, issuer and verified email | `admin` if listed in `ADMIN_EMAILS`, otherwise `viewer` |
+| Browser user (fallback) | `POST /api/auth/login {"email","password"}`; accounts are created by an admin (`POST /api/users`) or seeded with `SEED_ADMIN_*` | as assigned |
+| Script / eval / server | header `X-API-Key: <API_KEY>` | admin |
+
+- Login returns `{access_token, expires_in, user}` and sets two **HttpOnly** cookies:
+  - `zg_access`: the same access JWT (30 min), so `<img src="/api/...png">` works;
+  - `zg_refresh`: 14 days, path `/api/auth`, rotated on every use; reusing an old one revokes the session.
+- Send `Authorization: Bearer <access_token>`, or rely on the cookie with `credentials: "include"`. On a `401`, call `POST /api/auth/refresh` and retry. `POST /api/auth/logout` ends the session. `GET /api/auth/me` returns the profile. `GET /api/auth/config` (public) tells the login page whether Google and password login are on, and gives the Google client ID.
+- **viewer:** ask, chat, edit and resend, share, camera, read the library, alerts and amendments.
+- **admin:** also upload, edit, disable and re-ingest documents, confirm or edit amendments, run and dismiss scans, and manage users (`GET/POST/PATCH /api/users`).
+- Chats are private to their owner. Share links stay public by token.
+- Google setup (free): Google Cloud console → APIs & Services → Credentials → OAuth client ID → "Web application". Add the frontend URL(s) to **Authorized JavaScript origins** (e.g. `http://localhost:5173` and the production URL), then put the client ID in `GOOGLE_CLIENT_ID`.
+
+## API (all `/api/*` need a signed-in user or `X-API-Key`)
 | Area | Endpoints |
 |---|---|
 | Library | `POST /api/documents` (multi-file upload), `GET /api/documents` (upload time, status, counts), `GET/PATCH /api/documents/{id}` (edit, `active=false` to disable), `POST /api/documents/{id}/reingest`, `GET /api/documents/{id}/file`, `GET /api/documents/{id}/pages/{n}.png?highlight=sid,sid`, `GET /api/sentences/{id}/preview.png`, `GET /api/jobs/{id}` |
