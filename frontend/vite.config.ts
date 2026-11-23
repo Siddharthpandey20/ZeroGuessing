@@ -1,25 +1,18 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-// Dev: the API runs on :8000 and is proxied, so the browser sees one origin
-// (session cookies work for fetch and for <img> page renders; no CORS).
-const API = process.env.VITE_API_ORIGIN ?? 'http://localhost:8000'
-const proxy = Object.fromEntries(['/api', '/auth', '/public', '/health'].map((p) => [p, { target: API, changeOrigin: true }]))
+// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
+// or the app will break with duplicate plugins:
+//   - TanStack devtools (dev-only, first), tanstackStart, viteReact, tailwindcss, tsConfigPaths,
+//     nitro (build-only using cloudflare as a default target), VITE_* env injection, @ path alias,
+//     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
+// Never set ssr.external or resolve.external: the Worker has no runtime module resolution, so
+// the build fails. Never add compression (compressPublicAssets, vite-plugin-compression):
+// hosting already compresses at the edge.
+// You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
+import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
-  plugins: [react()],
-  server: { port: 5173, proxy },
-  preview: { port: 4173, proxy },
-  build: {
-    target: 'es2022',
-    cssCodeSplit: true,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router'],
-          query: ['@tanstack/react-query'],
-        },
-      },
-    },
+  tanstackStart: {
+    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
+    // nitro/vite builds from this
+    server: { entry: "server" },
   },
-})
+});
