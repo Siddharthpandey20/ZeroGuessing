@@ -89,6 +89,36 @@ async def check_evidence(session: AsyncSession, evidence: list[Evidence], values
                          max_pairs: int = 6, doc_ids: list[str] | None = None) -> list[Contradiction]:
     """Query-time check over the retrieved evidence; also returns already-known alerts touching it.
     With `doc_ids` (a chat's documents), a known alert counts only if both of its sentences are in that scope."""
+    known, pairs = await plan_evidence_check(session, evidence, values, max_pairs, doc_ids)
+    return await finish_evidence_check(session, known, pairs, await confirm_pairs(pairs))
+
+
+async def confirm_pairs(pairs: list) -> list | None:
+    """The model call of the query-time check, on its own: it never touches the DB session, so the answer pipeline
+    runs it while the draft and the verifier run (it is a third of the answer's time otherwise). None: no verdict."""
+    if not pairs:
+        return []
+    try:
+        return await _confirm([(_ev_dict(a), _ev_dict(b)) for _, a, b in pairs])
+    except Exception as e:
+        log.warning("contradiction confirm failed: %s", e)
+        return None
+
+
+async def finish_evidence_check(session: AsyncSession, known: list[Contradiction], pairs: list, items: list | None) -> list[Contradiction]:
+    if not pairs or items is None:
+        return known
+    for it in items:
+        if 0 <= it.idx < len(pairs) and it.conflict and it.same_subject:
+            _, a, b = pairs[it.idx]
+            known.append(await _store(session, _ev_dict(a), _ev_dict(b), it, "query"))
+    await session.commit()
+    return known
+
+
+async def plan_evidence_check(session: AsyncSession, evidence: list[Evidence], values: dict[str, list[Value]],
+                              max_pairs: int = 6, doc_ids: list[str] | None = None) -> tuple[list[Contradiction], list]:
+    """DB part of the query-time check: the known alerts touching the evidence, and the candidate pairs to confirm."""
     links = await chain_keys(session, doc_ids)
     sids = [e.sentence_id for e in evidence]
     known = list((await session.execute(select(Contradiction).where(
@@ -110,20 +140,7 @@ async def check_evidence(session: AsyncSession, evidence: list[Evidence], values
         if kind:
             pairs.append((kind, a, b))
     pairs.sort(key=lambda p: p[0] != "number")
-    pairs = pairs[:max_pairs]
-    if not pairs:
-        return known
-    try:
-        items = await _confirm([(_ev_dict(a), _ev_dict(b)) for _, a, b in pairs])
-    except Exception as e:
-        log.warning("contradiction confirm failed: %s", e)
-        return known
-    for it in items:
-        if 0 <= it.idx < len(pairs) and it.conflict and it.same_subject:
-            _, a, b = pairs[it.idx]
-            known.append(await _store(session, _ev_dict(a), _ev_dict(b), it, "query"))
-    await session.commit()
-    return known
+    return known, pairs[:max_pairs]
 
 
 async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: int = 10) -> int:

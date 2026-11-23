@@ -133,3 +133,36 @@ async def test_pipeline(client):
     await c.patch(f"/api/documents/{c_id}", headers=H, json={"active": False})
     a = (await ask(c, chat, "What is the prepayment penalty on a floating-rate home loan?", "2026-11-23"))["answer"]
     assert "1%" in a["claims"][0]["text"], a["claims"]
+
+
+async def test_answer_is_not_held_back_by_the_conflict_check(client, monkeypatch):
+    """The verified answer streams before a slow contradiction check; an update with its result follows and is saved."""
+    import asyncio
+    import json
+
+    import app.core.answer as answer_mod
+
+    real = answer_mod.confirm_pairs
+
+    async def slow(pairs):
+        await asyncio.sleep(1.0)  # longer than the fake draft + verify
+        return await real(pairs)
+
+    monkeypatch.setattr(answer_mod, "confirm_pairs", slow)
+    c = client
+    chat = (await c.post("/api/chats", headers=H, json={})).json()["id"]
+    r = await c.post(f"/api/chats/{chat}/messages", headers=H,
+                     json={"question": "What penal charges apply on an overdue instalment?", "as_of": "2026-11-23"})
+    assert r.status_code == 200, r.text
+    events = []
+    for block in r.text.replace("\r\n", "\n").split("\n\n"):
+        name = next((ln[6:].strip() for ln in block.split("\n") if ln.startswith("event:")), None)
+        data = next((ln[5:].strip() for ln in block.split("\n") if ln.startswith("data:")), None)
+        if name in ("answer", "answer_update"):
+            events.append((name, json.loads(data)["answer"]))
+    assert [n for n, _ in events] == ["answer", "answer_update"], [n for n, _ in events]
+    first, final = events[0][1], events[1][1]
+    assert first["conflicts_pending"] is True and final["conflicts_pending"] is False
+    assert first["faithfulness"] == final["faithfulness"]  # a conflict flag never changes the score
+    saved = (await c.get(f"/api/chats/{chat}", headers=H)).json()["turns"][-1]["versions"][-1]["answer"]
+    assert saved["conflicts_pending"] is False  # the stored answer is the updated one

@@ -220,7 +220,7 @@ async def _run(msg_id: str, use_cache: bool = True):
             doc_ids = await _scope(session, await session.get(Chat, m.chat_id))
             history = await _history(session, m)
             async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids, history=history):
-                if ev["type"] == "answer":
+                if ev["type"] in ("answer", "answer_update"):  # an update follows an early answer once conflicts are checked
                     m.answer, m.status = ev["answer"], "done"
                     await session.commit()
                     yield {**ev, "message": _msg(m)}

@@ -1,5 +1,6 @@
 """Question -> verified AnswerObject (plan C.1 query pipeline). Yields progress events for SSE."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.amendments import key
-from app.core.contradictions import alert_view, check_evidence
+from app.core.contradictions import alert_view, confirm_pairs, finish_evidence_check, plan_evidence_check
 from app.core.intent import chat_reply, classify, is_followup, overview, resolve_followup
 from app.core.normalise import Value
 from app.core.retrieve import RetrievalResult, retrieve
@@ -33,8 +34,12 @@ DRAFT_SYSTEM = (
     "as a separate claim marked historical=true or as a not-yet-effective note. (5) If two current quotes disagree, write a "
     "kind=conflict_note claim citing both instead of choosing one. (6) For calculations, do not do arithmetic: emit one "
     "kind=calc_result claim with calc.formula and calc.operands (each operand cites the evidence id and copies the value exactly "
-    "as written). (7) If the evidence does not contain what is asked, set answerable=false or leave it out, and list what is "
-    "missing in 'missing'. (8) Keep numbers, amounts and dates exactly as written in the evidence."
+    "as written). (7) Answer every part of the question that the evidence proves, even when another part cannot be "
+    "answered: a question that assumes something the evidence does not establish (which document is newer, that a second "
+    "version exists, that both documents cover a topic) still gets claims for what each document does say, each naming its "
+    "document; never decide which document is newer, older or amending unless the evidence states it. List only the parts "
+    "that are not proven in 'missing', and set answerable=false only when no part of the question is proven. "
+    "(8) Keep numbers, amounts and dates exactly as written in the evidence."
 )
 TRANSLATE_SYSTEM = ("Translate each English sentence into natural Hindi. Keep every number, amount (₹), percentage, date "
                     "and clause/paragraph reference exactly as in the English. Return the same number of items in order.")
@@ -170,11 +175,20 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         yield {"type": "answer", "answer": ans}
         return
 
+    # The contradiction check needs only the evidence, not the draft: pick its candidate pairs now (DB) and let its
+    # model call run while the draft and the verifier run, instead of after them.
+    values: dict[str, list[Value]] = {}
+    for srow in (await session.execute(select(Sentence.id, Sentence.values).where(Sentence.id.in_([e.sentence_id for e in r.evidence])))).all():
+        values[srow.id] = [Value(v["type"], v["value"], v.get("period")) for v in srow.values]
+    known, pairs = await plan_evidence_check(session, r.evidence, values, doc_ids=doc_ids)
+    confirming = asyncio.create_task(confirm_pairs(pairs))
+
     yield {"type": "stage", "stage": "drafting", "evidence": len(r.evidence)}
     prompt = f"AS-OF DATE: {as_of.isoformat()}\nQUESTION: {q_en}\n\nEVIDENCE:\n{_evidence_block(r)}"
     try:
-        draft = await get_llm().generate_json(Draft, prompt, DRAFT_SYSTEM)
+        draft = await get_llm().generate_json(Draft, prompt, DRAFT_SYSTEM, thinking=s.llm_thinking_draft or None)
     except Exception as e:
+        confirming.cancel()
         log.exception("draft failed")
         yield {"type": "error", "message": f"answer generation failed: {e}"}
         return
@@ -187,48 +201,60 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
                                       "quotes": len(c.citations), "judge": c.judge} for c in claims])
     t = tick("verify", t)
 
-    yield {"type": "stage", "stage": "checking_contradictions"}
-    values: dict[str, list[Value]] = {}
-    for srow in (await session.execute(select(Sentence.id, Sentence.values).where(Sentence.id.in_([e.sentence_id for e in r.evidence])))).all():
-        values[srow.id] = [Value(v["type"], v["value"], v.get("period")) for v in srow.values]
-    contras = await check_evidence(session, r.evidence, values, doc_ids=doc_ids)
-    cited = {c["sentence_id"] for vc in claims for c in vc.citations}
-    relevant = [c for c in contras if c.sentence_a in cited or c.sentence_b in cited]
-    for vc in claims:
-        ids = {c["sentence_id"] for c in vc.citations}
-        hits = [c.id for c in relevant if c.sentence_a in ids or c.sentence_b in ids]
-        if hits and vc.verdict == "supported":
-            vc.verdict, vc.conflict_ids = "conflicted", hits
-            vc.reason = "the documents contain a conflicting clause on this point (shown side by side)"
-    yield step("conflicts", t, pairs=len(contras), relevant=len(relevant))
-    t = tick("contradictions", t)
-
-    if lang == "hi":
+    if lang == "hi":  # translation does not depend on the conflict check: do it while that may still be running
         yield {"type": "stage", "stage": "translating_answer"}
         await _translate(claims)
         yield step("translate_answer", t, kept=sum(1 for c in claims if c.text_hi), total=len(claims))
         t = tick("translate", t)
 
-    shown = [c for c in claims if c.verdict in ("supported", "conflicted")]
-    blocked = [c for c in claims if c.verdict in ("unsupported", "contradicted")]
-    if not shown:
-        out = {**base, **_abstain(r, blocked, draft.missing)}
-    else:
-        status = "conflicted" if any(c.verdict == "conflicted" for c in shown) else ("partial" if blocked or draft.missing else "answered")
-        out = {**base, "status": status, "abstention": None if not draft.missing else _missing_note(r, draft.missing)}
-    out["claims"] = [c.to_dict() for c in claims]
-    out["faithfulness"] = faithfulness(claims)
-    out["calculations"] = [c.calculation for c in claims if c.calculation]
-    out["contradictions"] = await alert_view(session, relevant)
-    out["amendment_chains"] = _chains(r)
-    out["timings_ms"] = {**timings, "total": int((time.perf_counter() - t0) * 1000)}
-    out["trace"] = trace
-    out["cached"] = False
+    async def build(contras: list[Contradiction], pending: bool) -> dict:
+        """The answer object, with the claims that touch a known conflict marked as conflicted."""
+        cited = {c["sentence_id"] for vc in claims for c in vc.citations}
+        relevant = [c for c in contras if c.sentence_a in cited or c.sentence_b in cited]
+        for vc in claims:
+            ids = {c["sentence_id"] for c in vc.citations}
+            hits = [c.id for c in relevant if c.sentence_a in ids or c.sentence_b in ids]
+            if hits and vc.verdict in ("supported", "conflicted"):
+                vc.verdict, vc.conflict_ids = "conflicted", hits
+                vc.reason = "the documents contain a conflicting clause on this point (shown side by side)"
+        shown = [c for c in claims if c.verdict in ("supported", "conflicted")]
+        blocked = [c for c in claims if c.verdict in ("unsupported", "contradicted")]
+        if not shown:
+            out = {**base, **_abstain(r, blocked, draft.missing)}
+        else:
+            status = "conflicted" if any(c.verdict == "conflicted" for c in shown) else ("partial" if blocked or draft.missing else "answered")
+            out = {**base, "status": status, "abstention": None if not draft.missing else _missing_note(r, draft.missing)}
+        out["claims"] = [c.to_dict() for c in claims]
+        out["faithfulness"] = faithfulness(claims)  # conflicted counts as backed, so this never changes on the update
+        out["calculations"] = [c.calculation for c in claims if c.calculation]
+        out["contradictions"] = await alert_view(session, relevant)
+        out["amendment_chains"] = _chains(r)
+        out["timings_ms"] = {**timings, "total": int((time.perf_counter() - t0) * 1000)}
+        out["trace"] = list(trace)
+        out["cached"] = False
+        out["conflicts_pending"] = pending
+        return out
+
+    # The verified answer is not held back for the conflict check: if that is still running, the answer goes out now
+    # with the conflicts already known, and an update follows with any new ones (claims can only gain a conflict flag).
+    early = not confirming.done()
+    if early:
+        first = await build(known, pending=True)
+        first["timings_ms"]["first_answer"] = first["timings_ms"]["total"]
+        yield {"type": "answer", "answer": first}
+
+    yield {"type": "stage", "stage": "checking_contradictions"}
+    contras = await finish_evidence_check(session, known, pairs, await confirming)
+    yield step("conflicts", t, pairs=len(contras))
+    t = tick("contradictions", t)
+    out = await build(contras, pending=False)
+    if early:
+        out["timings_ms"]["first_answer"] = first["timings_ms"]["total"]
 
     if s.answer_cache:
         await session.merge(AnswerCache(key=cache_key, answer=out))  # upsert: "run again" re-answers an already-cached key
         await session.commit()
-    yield {"type": "answer", "answer": out}
+    yield {"type": "answer_update" if early else "answer", "answer": out}
 
 
 def _sources(r: RetrievalResult, n: int = 8) -> list[dict]:

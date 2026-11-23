@@ -112,6 +112,8 @@ export interface Answer {
   contradictions: Conflict[]
   amendment_chains: Chain[]
   abstention: Abstention | null
+  /** Shown before the conflict check finished; an update with any conflicts follows in the same stream. */
+  conflicts_pending?: boolean
   timings_ms: Record<string, number>
   /** every step the pipeline took, what it read and how long each took ("show work") */
   trace?: TraceStep[]

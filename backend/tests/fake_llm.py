@@ -33,7 +33,7 @@ class FakeLLM:
     async def read_image(self, data, mime):
         return "Penal charges on overdue amount shall be 24% p.a."
 
-    async def generate_json(self, schema, prompt, system, *, temperature=0.0):
+    async def generate_json(self, schema, prompt, system, *, temperature=0.0, thinking=None):
         self.calls.append(schema.__name__)
         return getattr(self, f"_{schema.__name__}")(prompt)
 

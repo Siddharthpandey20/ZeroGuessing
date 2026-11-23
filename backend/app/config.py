@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     gemini_fallback_models: str = "gemini-3.6-flash,gemini-3.5-flash-lite"
     gemini_embed_model: str = "gemini-embedding-2"
     embed_dim: int = 768
-    llm_timeout_s: float = 60.0
+    llm_timeout_s: float = 30.0  # per attempt; a timeout moves to the next model (drafts take ~6-15 s)
+    # Gemini "thinking" per call: MINIMAL | LOW | MEDIUM | HIGH, empty = the model's default. Less thinking is faster;
+    # measure answer quality (scripts.run_eval) before lowering it. The draft has its own knob, the other calls
+    # (judge, contradiction confirm, translation, amendment extraction, intent) share LLM_THINKING.
+    llm_thinking: str = ""
+    llm_thinking_draft: str = ""
 
     database_url: str = "postgresql+asyncpg://zeroguess:zeroguess@localhost:5433/zeroguess"
     api_key: str = "change-me"  # service/script access (X-API-Key, or the /auth/session cookie); acts as admin

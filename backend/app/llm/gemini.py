@@ -36,15 +36,19 @@ class GeminiClient:
         self.embed_model = s.gemini_embed_model
         self.dim = s.embed_dim
         self.timeout = s.llm_timeout_s
+        self.thinking = s.llm_thinking
 
     async def generate_json(
-        self, schema: type[T], prompt: str, system: str, *, temperature: float = 0.0, attempts: int = 3
+        self, schema: type[T], prompt: str, system: str, *, temperature: float = 0.0, attempts: int = 3,
+        thinking: str | None = None,
     ) -> T:
+        level = (thinking if thinking is not None else self.thinking).strip().upper()
         config = types.GenerateContentConfig(
             system_instruction=system,
             temperature=temperature,
             response_mime_type="application/json",
             response_schema=schema,
+            thinking_config=types.ThinkingConfig(thinking_level=level) if level else None,
         )
         last: Exception | None = None
         for model in self.models:
@@ -72,8 +76,10 @@ class GeminiClient:
                         raise LLMError(str(e)) from e
                     await asyncio.sleep(min(2**attempt, 8))
                 except TimeoutError as e:
+                    # a stalled model rarely recovers within seconds: try the next one instead of waiting again
                     last = e
                     log.warning("llm timeout model=%s attempt=%d", model, attempt)
+                    break
         raise LLMError(f"all models failed: {last}")
 
     async def read_image(self, data: bytes, mime: str) -> str:
@@ -97,17 +103,20 @@ class GeminiClient:
             batch = texts[i : i + 100]
             for attempt in range(4):
                 try:
-                    resp = await self.client.aio.models.embed_content(
+                    resp = await asyncio.wait_for(self.client.aio.models.embed_content(
                         model=self.embed_model,
                         # one Content per text: gemini-embedding-2 merges a plain list of strings into ONE embedding
                         contents=[types.Content(parts=[types.Part(text=t)]) for t in batch],
                         config=types.EmbedContentConfig(task_type=task, output_dimensionality=self.dim),
-                    )
+                    ), timeout=self.timeout)
                     break
                 except errors.APIError as e:
                     if e.code not in _RETRYABLE or attempt == 3:
                         raise LLMError(str(e)) from e
                     await asyncio.sleep(2**attempt)
+                except TimeoutError as e:
+                    if attempt >= 1:  # a question's embedding is waited on: fail over to keyword search, don't hang
+                        raise LLMError(f"embedding timed out after {self.timeout:.0f}s") from e
             if len(resp.embeddings) != len(batch):  # never hand back fewer vectors than texts: callers zip them
                 raise LLMError(f"embedding model returned {len(resp.embeddings)} vectors for {len(batch)} texts")
             vecs = np.array([e.values for e in resp.embeddings], dtype=np.float32)
@@ -120,7 +129,8 @@ class GeminiClient:
 
 
 class LLM(Protocol):
-    async def generate_json(self, schema: type[T], prompt: str, system: str, *, temperature: float = 0.0) -> T: ...
+    async def generate_json(self, schema: type[T], prompt: str, system: str, *, temperature: float = 0.0,
+                            thinking: str | None = None) -> T: ...
     async def embed(self, texts: list[str], task: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]: ...
     async def embed_query(self, text: str) -> list[float]: ...
     async def read_image(self, data: bytes, mime: str) -> str: ...

@@ -96,6 +96,7 @@ export const HI: Record<string, string> = {
   'Questions in this chat: {n}': 'इस चैट के प्रश्न: {n}',
   'Jump to a question': 'किसी प्रश्न पर जाएँ',
   'Attached PDFs': 'जोड़ी गई PDF',
+  'Verified. Still checking the documents for conflicting clauses; any found will be flagged here.': 'सत्यापित। दस्तावेज़ों में परस्पर विरोधी खंडों की जाँच जारी है; कोई मिला तो यहाँ दिखाया जाएगा।',
   'Uploading…': 'अपलोड हो रही है…',
   'Reading…': 'पढ़ी जा रही है…',
   'Ready': 'तैयार',

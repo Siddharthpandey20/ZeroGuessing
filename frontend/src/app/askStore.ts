@@ -54,6 +54,7 @@ export async function runAnswer(
   const { chatId } = opts
   let p: Pending = { chatId, turn: opts.turn, question: opts.question, asOf: opts.asOf, stage: null, info: {}, trace: [], startedAt: Date.now() }
   set(chatId, p)
+  let shown = false // an early answer is on screen; the stream stays open for its conflict-check update
   try {
     for await (const ev of streamEvents(opts.path, opts.body, { method: opts.method })) {
       const d = ev.data as Record<string, unknown>
@@ -74,16 +75,35 @@ export async function runAnswer(
         ])
         set(chatId, null)
         if (msg) onDone?.(msg)
+        // the verified answer arrived before the conflict check finished: keep listening for its update
+        if (!(d.answer as { conflicts_pending?: boolean } | undefined)?.conflicts_pending) return
+        shown = true
+      } else if (ev.event === 'answer_update') {
+        // the same answer with any conflicts the check found; the turn is already on screen, so just refresh it
+        await Promise.all([qc.invalidateQueries({ queryKey: ['chat', chatId] }), qc.invalidateQueries({ queryKey: ['alerts'] })])
         return
       } else if (ev.event === 'error') {
+        if (shown) {
+          // the answer is already shown and saved; only the late conflict check failed
+          qc.invalidateQueries({ queryKey: ['chat', chatId] })
+          return
+        }
         set(chatId, { ...p, error: (d.message as string) || 'The answer could not be produced.' })
         qc.invalidateQueries({ queryKey: ['chat', chatId] })
         return
       }
     }
+    if (shown) {
+      qc.invalidateQueries({ queryKey: ['chat', chatId] }) // closed before the update: show what was saved
+      return
+    }
     // stream ended without an answer event
     set(chatId, { ...p, error: 'The connection closed before the answer arrived.' })
   } catch (e) {
+    if (shown) {
+      qc.invalidateQueries({ queryKey: ['chat', chatId] })
+      return
+    }
     set(chatId, { ...p, error: e instanceof Error ? e.message : 'The request failed.' })
   }
 }

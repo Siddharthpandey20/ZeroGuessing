@@ -82,6 +82,9 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
         <p className={styles.readAs}><span>{tr('Read as:')}</span> {answer.question_resolved}</p>
       )}
       {answer.overview && <p className={styles.readAs}>{tr('An overview built from the documents themselves: their section headings, or their opening line.')}</p>}
+      {answer.conflicts_pending && (
+        <p className={styles.readAs} role="status">{tr('Verified. Still checking the documents for conflicting clauses; any found will be flagged here.')}</p>
+      )}
       {abstained && answer.abstention && (
         <Abstention answer={answer} cropFor={cropFor} selectedSentence={selectedSentence} onCite={selectCitation} />
       )}

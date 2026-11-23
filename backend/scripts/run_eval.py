@@ -56,6 +56,8 @@ def score(item: dict, ans: dict) -> dict:
         "pending_shown": any(ch.get("events") and any(e.get("state") == "not_yet_effective" for e in ch["events"])
                              for ch in ans.get("amendment_chains", [])),
         "latency_ms": (ans.get("timings_ms") or {}).get("total"), "cached": ans.get("cached"),
+        # what the user waits for: the verified answer is shown before a slow conflict check finishes
+        "first_answer_ms": (ans.get("timings_ms") or {}).get("first_answer") or (ans.get("timings_ms") or {}).get("total"),
     }
 
 
@@ -81,6 +83,8 @@ def summary(rows: list[dict]) -> dict:
         "mean_faithfulness_pct": round(statistics.mean([r["faithfulness"] for r in rows if r["faithfulness"] is not None]), 1),
         "latency_p50_ms": int(statistics.median(lat)) if lat else None,
         "latency_p95_ms": int(sorted(lat)[int(0.95 * (len(lat) - 1))]) if lat else None,
+        "first_answer_p50_ms": int(statistics.median(first)) if (first := [r["first_answer_ms"] for r in rows if r["first_answer_ms"] and not r["cached"]]) else None,
+        "first_answer_p95_ms": int(sorted(first)[int(0.95 * (len(first) - 1))]) if first else None,
     }
 
 
@@ -90,6 +94,7 @@ def main() -> None:
     ap.add_argument("--key", required=True)
     ap.add_argument("--ingest", action="store_true")
     ap.add_argument("--only", default="", help="comma-separated ids")
+    ap.add_argument("--demo", action="store_true", help="add the demo corpus to the eval chat (chats answer only from their own documents)")
     args = ap.parse_args()
     c = httpx.Client(base_url=args.base, headers={"X-API-Key": args.key}, timeout=180)
     if args.ingest:
@@ -98,6 +103,14 @@ def main() -> None:
     if args.only:
         items = [i for i in items if i["id"] in args.only.split(",")]
     chat = c.post("/api/chats", json={"title": f"eval {datetime.now():%Y-%m-%d %H:%M}"}).json()["id"]
+    if args.demo:
+        c.post(f"/api/chats/{chat}/documents/demo")
+        for _ in range(300):
+            docs = c.get(f"/api/chats/{chat}/documents").json()
+            if docs and all(d["ingest_status"] not in ("queued", "parsing", "embedding") for d in docs):
+                break
+            time.sleep(2)
+        print("eval chat documents:", {d["title"][:40]: d["ingest_status"] for d in c.get(f"/api/chats/{chat}/documents").json()})
     rows = []
     for it in items:
         body = {"question": it["q"], **({"as_of": it["as_of"]} if it.get("as_of") else {})}
