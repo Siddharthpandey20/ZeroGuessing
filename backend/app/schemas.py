@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------- draft
 class Operand(BaseModel):
     name: str = Field(description="operand name, e.g. principal, annual_rate, months, days, base, percent")
-    cite: str = Field(description="evidence id the value comes from, e.g. e7")
-    value: str = Field(description="the value exactly as written in that evidence, e.g. '9.50% p.a.'")
+    cite: str = Field(description="evidence id the value comes from, e.g. e7; 'Q' if the question itself states it")
+    value: str = Field(description="the value exactly as written in that evidence (or question), e.g. '9.50% p.a.'")
 
 
 class CalcSpec(BaseModel):

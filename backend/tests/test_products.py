@@ -41,6 +41,33 @@ def test_unknown_issuer_stays_eligible():
     assert same_product(a, identify("HDFC ERGO Group Mediclaim Policy", []))
 
 
+BANK = "Master Policy on Retail Loans Sunrise Co-operative Bank Ltd. (fictional) — Circular No. SCB/RL/2025/01"
+INSURER = "Policy Schedule – Home Loan Protection Insurance Suraksha General Insurance Co. Ltd. (fictional) — Master Policy"
+VENDOR = ("Loan Servicing Platform Services Agreement Between Sunrise Co-operative Bank Ltd. (fictional) (the Bank) and "
+          "Kavach Tech Solutions Pvt. Ltd. (fictional)")
+
+
+def test_issuer_from_page_one():
+    assert identify("Master Policy on Retail Loans", [], BANK).insurer == "org:sunrise"
+    assert identify("Policy Schedule – Home Loan Protection Insurance", [], INSURER).insurer == "org:suraksha"
+    # a contract names two companies: the first-named (the issuer) wins the tie
+    assert identify("Loan Servicing Platform Services Agreement", [], VENDOR).insurer == "org:sunrise"
+    # a known insurer in the opening lines when the title lacks it
+    assert identify("Group Mediclaim Policy", [], "THE NEW INDIA ASSURANCE CO. LTD Regd. & Head Office").insurer == "newindia"
+
+
+def test_different_sources_never_conflict_same_source_always_may():
+    master = identify("Master Policy on Retail Loans", [], BANK)
+    kfs = identify("Key Facts Statement – Home Loan", [], "Key Facts Statement – Home Loan Sunrise Co-operative Bank Ltd.")
+    vendor = identify("Loan Servicing Platform Services Agreement", [], VENDOR)
+    schedule = identify("Policy Schedule – Home Loan Protection Insurance", [], INSURER)
+    tata = identify("Tata AIG Group MediCare Policy", [])
+    # one bank's documents must agree even though their names differ (no product-name test for non-insurers)
+    assert same_product(master, kfs) and same_product(master, vendor)
+    assert not same_product(schedule, master)
+    assert not same_product(schedule, tata)
+
+
 def test_related_same_document_and_missing():
     p = {"x": identify("HDFC ERGO Group Mediclaim Policy", []), "y": identify("Tata AIG Group MediCare Policy", [])}
     assert related(p, "x", "x")

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.amendments import chain_keys, key
 from app.core.normalise import Value, conflicts
-from app.core.products import products, related
+from app.core.products import products, related, relation
 from app.core.retrieve import Evidence
 from app.llm.gemini import get_llm
 from app.models import Chunk, Clause, Contradiction, Document, PairCheck, Sentence
@@ -65,6 +65,9 @@ async def _confirm(pairs: list[tuple[dict, dict]]) -> list:
     blocks = [
         f"[{i}] A: \"{a['text']}\" ({a['doc_title']}, {a['clause_ref']}, heading: {a['heading']})\n"
         f"    B: \"{b['text']}\" ({b['doc_title']}, {b['clause_ref']}, heading: {b['heading']})"
+        # what is known for certain about the two documents (same product by UIN, same issuer...): a mis-parsed
+        # heading must not make the model take one product for two
+        + (f"\n    Relation: {b['relation']}." if b.get("relation") else "")
         for i, (a, b) in enumerate(pairs)
     ]
     res = await get_llm().generate_json(ContraOut, "Check each pair.\n\n" + "\n\n".join(blocks), SYSTEM)
@@ -127,7 +130,7 @@ async def confirm_pairs(pairs: list) -> list | None:
     if not pairs:
         return []
     try:
-        return await _confirm([(_ev_dict(a), _ev_dict(b)) for _, a, b in pairs])
+        return await _confirm([(_ev_dict(a), {**_ev_dict(b), "relation": rel}) for _, a, b, rel in pairs])
     except Exception as e:
         log.warning("contradiction confirm failed: %s", e)
         return None
@@ -136,10 +139,10 @@ async def confirm_pairs(pairs: list) -> list | None:
 async def finish_evidence_check(session: AsyncSession, known: list[Contradiction], pairs: list, items: list | None) -> list[Contradiction]:
     if not pairs or items is None:
         return known
-    await _record(session, [(_ev_dict(a), _ev_dict(b)) for _, a, b in pairs], items)
+    await _record(session, [(_ev_dict(a), _ev_dict(b)) for _, a, b, _ in pairs], items)
     for it in items:
         if 0 <= it.idx < len(pairs) and it.conflict and it.same_subject:
-            _, a, b = pairs[it.idx]
+            _, a, b, _ = pairs[it.idx]
             known.append(await _store(session, _ev_dict(a), _ev_dict(b), it, "query"))
     await session.commit()
     return known
@@ -175,12 +178,14 @@ async def plan_evidence_check(session: AsyncSession, evidence: list[Evidence], v
             continue
         kind = candidate(a.text, values.get(a.sentence_id, []), a.heading_path, b.text, values.get(b.sentence_id, []), b.heading_path)
         if kind:
-            pairs.append((kind, a, b))
+            pairs.append((kind, a, b, relation(prods, a.doc_id, b.doc_id)))
     # pairs the upload scan (or an earlier question) already judged are settled: a conflict among them is in `known`,
     # the rest were judged consistent. Only never-seen pairs go to the model, so usually there is no model call at all.
-    seen = await _already_checked(session, [(a.sentence_id, b.sentence_id) for _, a, b in pairs])
+    seen = await _already_checked(session, [(a.sentence_id, b.sentence_id) for _, a, b, _ in pairs])
     pairs = [p for p in pairs if frozenset((p[1].sentence_id, p[2].sentence_id)) not in seen]
-    pairs.sort(key=lambda p: p[0] != "number")
+    # only same-product pairs are left: two documents of one product disagreeing first (the case a reader can't spot
+    # inside one document), then value conflicts before rule conflicts
+    pairs.sort(key=lambda p: (p[1].doc_id == p[2].doc_id, p[0] != "number"))
     return known, pairs[:max_pairs]
 
 
@@ -267,7 +272,7 @@ async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: 
 
     seen = await _already_checked(session, [tuple(pk) for pk in cand])
     ranked = sorted((v for pk, v in cand.items() if pk not in seen), key=lambda t: (t[0] != "number", -t[1]))
-    pairs = [(a, b) for _, _, a, b in ranked[:60]]
+    pairs = [(a, {**b, "relation": relation(prods, a["doc_id"], b["doc_id"])}) for _, _, a, b in ranked[:60]]
     parts = [pairs[i:i + batch] for i in range(0, len(pairs), batch)]
     gate = asyncio.Semaphore(SCAN_PARALLEL)
 

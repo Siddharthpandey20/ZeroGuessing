@@ -18,7 +18,7 @@ from app.core.contradictions import alert_view, confirm_pairs, finish_evidence_c
 from app.core.intent import chat_reply, classify, is_followup, overview, resolve_followup
 from app.core.normalise import Value
 from app.core.products import products, related
-from app.core.retrieve import RetrievalResult, retrieve
+from app.core.retrieve import RetrievalResult, clause_neighbours, retrieve
 from app.core.verify import VerifiedClaim, faithfulness, verify
 from app.llm import usage
 from app.llm.gemini import get_llm
@@ -36,15 +36,34 @@ DRAFT_SYSTEM = (
     "as a separate claim marked historical=true or as a not-yet-effective note. (5) If two current quotes disagree, write a "
     "kind=conflict_note claim citing both instead of choosing one. (6) For calculations, do not do arithmetic: emit one "
     "kind=calc_result claim with calc.formula and calc.operands (each operand cites the evidence id and copies the value exactly "
-    "as written). (7) Answer every part of the question that the evidence proves, even when another part cannot be "
+    "as written; a figure the QUESTION itself gives, such as the user's sum insured, cites 'Q' and is copied exactly as "
+    "written in the question; the rate or limit must still come from the evidence). A question that gives such a figure "
+    "and asks for the resulting amount is a calculation: answer it with a calc_result claim, not a 'missing' entry. (7) Answer every part of the question that the evidence proves, even when another part cannot be "
     "answered: a question that assumes something the evidence does not establish (which document is newer, that a second "
     "version exists, that both documents cover a topic) still gets claims for what each document does say, each naming its "
     "document; never decide which document is newer, older or amending unless the evidence states it. List only the parts "
     "that are not proven in 'missing', and set answerable=false only when no part of the question is proven. "
     "(8) Keep numbers, amounts and dates exactly as written in the evidence."
 )
-TRANSLATE_SYSTEM = ("Translate each English sentence into natural Hindi. Keep every number, amount (₹), percentage, date "
-                    "and clause/paragraph reference exactly as in the English. Return the same number of items in order.")
+_KEEP = ("Keep every number, amount (₹), percentage, date and clause/paragraph reference exactly as in the English, "
+         "written with international digits (0-9). Return the same number of items in order.")
+# answer languages besides English. Chhattisgarhi (hne) is written in Devanagari like Hindi, so the script alone cannot
+# tell them apart: the user picks it, and the request carries reply_lang.
+TRANSLATE_SYSTEM = {
+    "hi": "Translate each English sentence into natural Hindi. " + _KEEP,
+    "hne": ("Translate each English sentence into Chhattisgarhi (छत्तीसगढ़ी), the language of Chhattisgarh, written in "
+            "Devanagari. Use Chhattisgarhi grammar and everyday words as spoken in Raipur and Bilaspur (for example "
+            "'हावय', 'हे', 'ला', 'मन', 'के', 'म', 'नइ'), not standard Hindi. Keep insurance and banking terms that have no "
+            "common Chhattisgarhi word (premium, policy, claim, EMI) as they are. " + _KEEP),
+}
+REPLY_LANGS = ("hi", "hne")
+
+
+def answer_lang(question: str, reply_lang: str | None) -> str:
+    """The language the answer is written in: the one the user picked, else Hindi for a Devanagari question."""
+    if reply_lang in REPLY_LANGS:
+        return reply_lang
+    return "hi" if DEVANAGARI.search(question) else "en"
 
 
 EVIDENCE_HEADER = ("EVIDENCE (each line comes from the document named in the '##' heading above it; "
@@ -80,19 +99,22 @@ def _digits(s: str) -> list[str]:
     return sorted(re.findall(r"\d+(?:[.,]\d+)*", s))
 
 
-def _reply_answer(question: str, reply: str, as_of: date, t0: float) -> dict:
+def _reply_answer(question: str, reply: str, as_of: date, t0: float, lang: str = "en") -> dict:
     """A conversational reply (greeting, thanks, help): no claims, so nothing to verify; the UI marks it as not from
     the documents."""
-    return {"question": question, "question_en": None, "lang": "hi" if DEVANAGARI.search(question) else "en",
+    return {"question": question, "question_en": None, "lang": lang,
             "as_of": as_of.isoformat(), "status": "chat", "reply": reply, "searched": {"docs": 0, "terms": [], "evidence": 0},
             "claims": [], "faithfulness": faithfulness([]), "calculations": [], "contradictions": [], "amendment_chains": [],
             "abstention": None, "timings_ms": {"total": int((time.perf_counter() - t0) * 1000)}, "cached": False}
 
 
 async def answer_question(session: AsyncSession, question: str, as_of: date, use_cache: bool = True,
-                          doc_ids: list[str] | None = None, history: list[dict] | None = None) -> AsyncIterator[dict]:
+                          doc_ids: list[str] | None = None, history: list[dict] | None = None,
+                          reply_lang: str | None = None) -> AsyncIterator[dict]:
     """The full pipeline. `doc_ids`: answer only from these documents (a chat's own); None searches every active one.
-    `history`: earlier turns of the chat ({question, answer}), used to understand a follow-up question."""
+    `history`: earlier turns of the chat ({question, answer}), used to understand a follow-up question.
+    `reply_lang`: 'hi' or 'hne' (Chhattisgarhi) to answer in that language whatever the question's script; None follows
+    the question (Devanagari -> Hindi)."""
     t0 = time.perf_counter()
     timings: dict[str, int] = {}
     # "show the work": every step the pipeline took, what it looked at and how long it took. Streamed as it happens
@@ -112,15 +134,16 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     s = get_settings()
     meter = usage.start()  # tokens billed for this answer (all its model calls, the parallel conflict check included)
     asked = question
+    lang = answer_lang(question, reply_lang)
     kind = classify(question)
     if kind in ("smalltalk", "help"):
-        reply = chat_reply(question, kind, len(doc_ids) if doc_ids is not None else None)
-        yield {"type": "answer", "answer": _reply_answer(question, reply, as_of, t0)}
+        reply = chat_reply(question, kind, len(doc_ids) if doc_ids is not None else None, lang)
+        yield {"type": "answer", "answer": _reply_answer(question, reply, as_of, t0, lang)}
         return
     if doc_ids is not None and not doc_ids:
         r = RetrievalResult([], {}, None, 0, [], 0)
         yield {"type": "answer", "answer": {
-            "question": question, "question_en": None, "lang": "hi" if DEVANAGARI.search(question) else "en", "as_of": as_of.isoformat(),
+            "question": question, "question_en": None, "lang": lang, "as_of": as_of.isoformat(),
             "searched": {"docs": 0, "terms": [], "evidence": 0},
             **_abstain(r, [], ["this chat has no documents yet: upload a PDF to the chat, then ask again"]),
             "timings_ms": {"total": int((time.perf_counter() - t0) * 1000)}}}
@@ -129,10 +152,10 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         claims, n_docs = await overview(session, doc_ids)
         if not claims:
             reply = "Your documents are still being read. Ask again in a moment."
-            yield {"type": "answer", "answer": _reply_answer(question, reply, as_of, t0)}
+            yield {"type": "answer", "answer": _reply_answer(question, reply, as_of, t0, lang)}
             return
         yield {"type": "answer", "answer": {
-            "question": question, "question_en": None, "lang": "hi" if DEVANAGARI.search(question) else "en",
+            "question": question, "question_en": None, "lang": lang,
             "as_of": as_of.isoformat(), "status": "answered", "overview": True,
             "searched": {"docs": n_docs, "terms": [], "evidence": sum(len(c["citations"]) for c in claims)},
             "claims": claims, "faithfulness": {"supported": len(claims), "total": len(claims), "pct": 100.0, "blocked": 0},
@@ -147,21 +170,22 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         if resolved != asked:
             yield step("understand", t, resolved=resolved, turns=len(history))
     scope = ",".join(sorted(doc_ids)) if doc_ids is not None else "*"
-    cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{await corpus_version(session)}".encode()).hexdigest()
+    # the answer language is part of the key: the same question answered in Hindi is not the Chhattisgarhi answer
+    cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{lang}|{await corpus_version(session)}".encode()).hexdigest()
     if use_cache and s.answer_cache and (hit := await session.get(AnswerCache, cache_key)):
         # the same question on the same documents and date: the stored, already-verified answer, with its own trace
         # tokens: what THIS request cost (a follow-up rewrite at most), not what the stored answer cost when made
         yield {"type": "answer", "answer": {**hit.answer, "cached": True, "tokens": meter.summary()}}
         return
 
-    lang = "hi" if DEVANAGARI.search(question) else "en"
     q_en = question
-    if lang == "hi":
+    devanagari = bool(DEVANAGARI.search(question))  # a Hindi or Chhattisgarhi question: search and draft in English
+    if devanagari:
         yield {"type": "stage", "stage": "translating_question"}
         t = time.perf_counter()
         try:
             q_en = (await get_llm().generate_json(QueryTranslation, question,
-                    "Translate this Hindi question into precise English. Keep numbers and terms.")).english
+                    "Translate this Hindi or Chhattisgarhi question into precise English. Keep numbers and terms.")).english
         except Exception as e:
             log.warning("query translation failed: %s", e)
         yield step("translate_question", t, english=q_en if q_en != question else None)
@@ -177,7 +201,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         trace[-1]["ms"] = 0
     t = tick("retrieve", t)
 
-    base = {"question": asked, "question_resolved": resolved, "question_en": q_en if lang == "hi" else None, "lang": lang, "as_of": as_of.isoformat(),
+    base = {"question": asked, "question_resolved": resolved, "question_en": q_en if devanagari else None, "lang": lang, "as_of": as_of.isoformat(),
             "searched": {"docs": r.docs_searched, "terms": r.terms, "evidence": len(r.evidence)}}
 
     gate_fail = not r.evidence or (r.best_dense is not None and r.best_dense < s.min_dense_score and r.fts_hits == 0)
@@ -213,16 +237,21 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     t = tick("draft", t)
 
     yield {"type": "stage", "stage": "verifying", "claims": len(draft.claims)}
-    claims = await verify(draft, r.evidence, as_of.isoformat())
+    by_eid = {e.eid: e for e in r.evidence}
+    cited = list({i: by_eid[i] for c in draft.claims for i in c.cite if i in by_eid}.values())
+    claims = await verify(draft, r.evidence, as_of.isoformat(), named=r.named,
+                          neighbours=await clause_neighbours(session, cited), question=f"{question} {q_en}")
     yield step("verify", t, checks=[{"text": c.text, "verdict": c.verdict, "reason": c.reason, "kind": c.kind,
                                       "quotes": len(c.citations), "judge": c.judge} for c in claims])
     t = tick("verify", t)
 
-    if lang == "hi":  # translation does not depend on the conflict check: do it while that may still be running
+    if lang in REPLY_LANGS:  # translation does not depend on the conflict check: do it while that may still be running
         yield {"type": "stage", "stage": "translating_answer"}
-        await _translate(claims)
+        await _translate(claims, lang)
         yield step("translate_answer", t, kept=sum(1 for c in claims if c.text_hi), total=len(claims))
         t = tick("translate", t)
+
+    sides: set[int] = set()  # indexes of the other-side quotes build() adds to `claims`
 
     async def build(contras: list[Contradiction], pending: bool) -> dict:
         """The answer object, with the claims that touch a known conflict marked as conflicted."""
@@ -234,6 +263,22 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
             if hits and vc.verdict in ("supported", "conflicted"):
                 vc.verdict, vc.conflict_ids = "conflicted", hits
                 vc.reason = "the documents contain a conflicting clause on this point (shown side by side)"
+        views = await alert_view(session, relevant)
+        # a conflict must never read as one-sided: when the answer states only one side, add the other document's
+        # clause word for word (a verbatim quote, so proven by construction; no model call)
+        stated = {c["sentence_id"] for vc in claims if vc.verdict in ("supported", "conflicted") for c in vc.citations}
+        for v in views:
+            for mine, other in ((v["a"], v["b"]), (v["b"], v["a"])):
+                if mine["sentence_id"] in stated and other["sentence_id"] not in stated:
+                    claims.append(VerifiedClaim(
+                        f'However, {other["doc_title"]} ({other["clause_ref"]}) states: "{other["quote"].strip()}"',
+                        "conflicted", "the other side of a conflict between the documents (quoted word for word)",
+                        [{"sentence_id": other["sentence_id"], "doc_id": other["doc_id"], "doc_title": other["doc_title"],
+                          "clause_ref": other["clause_ref"], "page": other["page"], "quote": other["quote"],
+                          "bboxes": other["bboxes"], "status": "current", "status_note": "CURRENT"}],
+                        "conflict_note", conflict_ids=[v["id"]]))
+                    sides.add(len(claims) - 1)
+                    stated.add(other["sentence_id"])
         shown = [c for c in claims if c.verdict in ("supported", "conflicted")]
         blocked = [c for c in claims if c.verdict in ("unsupported", "contradicted")]
         if not shown:
@@ -242,9 +287,10 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
             status = "conflicted" if any(c.verdict == "conflicted" for c in shown) else ("partial" if blocked or draft.missing else "answered")
             out = {**base, "status": status, "abstention": None if not draft.missing else _missing_note(r, draft.missing)}
         out["claims"] = [c.to_dict() for c in claims]
-        out["faithfulness"] = faithfulness(claims)  # conflicted counts as backed, so this never changes on the update
+        # drafted claims only: an added other-side quote is not the model's work (conflicted counts as backed)
+        out["faithfulness"] = faithfulness([c for i, c in enumerate(claims) if i not in sides])
         out["calculations"] = [c.calculation for c in claims if c.calculation]
-        out["contradictions"] = await alert_view(session, relevant)
+        out["contradictions"] = views
         # claims drawn from different products (two insurers' policies): their terms differ by design. Say so
         # neutrally, so a reader does not take the difference for a conflict nor for an error.
         docs = list(dict.fromkeys(c["doc_id"] for vc in shown for c in vc.citations if c.get("doc_id")))
@@ -349,12 +395,13 @@ def _abstain(r: RetrievalResult, blocked: list[VerifiedClaim], missing: list[str
             "calculations": [], "contradictions": [], "amendment_chains": []}
 
 
-async def _translate(claims: list[VerifiedClaim]) -> None:
+async def _translate(claims: list[VerifiedClaim], lang: str = "hi") -> None:
+    """Fills text_hi (the translated sentence; Hindi or Chhattisgarhi, see the answer's lang)."""
     texts = [c.text for c in claims]
     if not texts:
         return
     try:
-        res = await get_llm().generate_json(Translation, json.dumps(texts, ensure_ascii=False), TRANSLATE_SYSTEM)
+        res = await get_llm().generate_json(Translation, json.dumps(texts, ensure_ascii=False), TRANSLATE_SYSTEM[lang])
     except Exception as e:
         log.warning("answer translation failed: %s", e)
         return

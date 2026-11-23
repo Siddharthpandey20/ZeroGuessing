@@ -1,4 +1,4 @@
-import { createElement, type CSSProperties, type ReactNode } from 'react'
+import { createElement, Fragment, type CSSProperties, type ReactNode } from 'react'
 import { useInView } from '../lib/motion'
 
 /** Fades and rises into place the first time it scrolls into view. Visible without JavaScript (see global.css). */
@@ -23,11 +23,15 @@ export function SplitText({ text, as = 'h2', className, delay = 0, step = 55 }: 
   return createElement(
     as,
     { ref, className, 'data-split': '', 'data-in': inView || undefined, 'aria-label': text },
+    // the space goes between the word boxes, not inside them: a trailing space inside an inline-block is dropped,
+    // which ran the words together ("Askyour firstquestion.")
     words.map((w, i) => (
-      <span key={i} className="split-word" aria-hidden="true">
-        <span className="split-inner" style={{ '--d': `${delay + i * step}ms` } as CSSProperties}>{w}</span>
-        {i < words.length - 1 ? ' ' : ''}
-      </span>
+      <Fragment key={i}>
+        <span className="split-word" aria-hidden="true">
+          <span className="split-inner" style={{ '--d': `${delay + i * step}ms` } as CSSProperties}>{w}</span>
+        </span>
+        {i < words.length - 1 ? ' ' : null}
+      </Fragment>
     )),
   )
 }

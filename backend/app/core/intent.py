@@ -64,8 +64,10 @@ def is_followup(question: str) -> bool:
     return bool(_FOLLOW_START.match(q)) or (len(q.split()) <= 7 and bool(_PRONOUN.search(q)))
 
 
-def chat_reply(question: str, kind: str, n_docs: int | None) -> str:
-    hindi = bool(re.search(r"[ऀ-ॿ]", question))
+def chat_reply(question: str, kind: str, n_docs: int | None, lang: str | None = None) -> str:
+    """`lang`: the answer language ('en' | 'hi' | 'hne'); None follows the question's script."""
+    lang = lang or ("hi" if re.search(r"[ऀ-ॿ]", question) else "en")
+    hindi = lang == "hi"
     q = question.strip().lower()
     docs = ("This chat has no documents yet: add PDFs with the paperclip or the Documents button." if n_docs == 0
             else f"This chat has {n_docs} document{'s' if n_docs != 1 else ''}." if n_docs else "")
@@ -75,6 +77,8 @@ def chat_reply(question: str, kind: str, n_docs: int | None) -> str:
                 "disagree, track which version of a rule applies on the date you pick, work out figures like an EMI from "
                 "the cited numbers, and say \"I don't have proof\" instead of guessing. Ask in English or Hindi, by "
                 f"typing, speaking or photographing a clause. {docs}").strip()
+    if lang == "hne":  # Chhattisgarhi
+        return "धन्यवाद! दस्तावेज मन के बारे म कुछु भी पूछव।" if re.search(r"धन्यवाद|शुक्रिया", question) else             "जोहार! ए चैट के दस्तावेज मन के बारे म पूछव, मँय हर जवाब के परमान देखाहूँ।"
     if hindi:
         return "धन्यवाद! दस्तावेज़ों के बारे में कुछ भी पूछिए।" if re.search(r"धन्यवाद|शुक्रिया", question) else \
             "नमस्ते! इस चैट के दस्तावेज़ों के बारे में पूछिए, मैं हर उत्तर का प्रमाण दिखाऊँगा।"

@@ -13,10 +13,10 @@ const runDate = (() => {
 const FIGURES: { value: string; label: string; note: string; tone?: 'proof' | 'block' }[] = [
   { value: pct(m.answer_correctness), label: 'Answers correct', note: 'The expected figure or rule is in the answer.', tone: 'proof' },
   { value: pct(m.citation_validity), label: 'Citations valid', note: 'The cited document, page and clause hold the quote.', tone: 'proof' },
-  { value: pct(m.contradiction_recall), label: 'Conflicts found', note: 'Planted contradictions flagged, with both quotes.', tone: 'proof' },
-  { value: `${Math.round(100 - m.mean_faithfulness_pct)}%`, label: 'Drafted claims stopped', note: 'Of everything the model wrote, this share failed a check and never reached the screen.', tone: 'block' },
-  { value: pct(m.false_conflict_rate), label: 'False alarms', note: 'Conflicts reported where the documents agree.' },
-  { value: pct(m.abstention_recall), label: 'Silences kept', note: 'Questions the documents cannot answer, refused instead of guessed.' },
+  { value: pct(m.contradiction_recall), label: 'Conflicts found', note: 'Real contradictions between documents flagged, with both quotes.', tone: 'proof' },
+  { value: pct(m.false_conflict_rate), label: 'False alarms', note: 'Conflicts reported where the documents agree. Lower is better.' },
+  { value: pct(1 - m.over_abstention), label: 'Answered, not refused', note: 'Answerable questions given a verified answer instead of a needless refusal.', tone: 'proof' },
+  { value: `${Math.round((m.first_answer_p50_ms ?? 0) / 1000)} s`, label: 'To a verified answer', note: 'Median time until the checked, cited answer is on screen.' },
 ]
 
 const SAFEGUARDS = [
@@ -28,15 +28,17 @@ const SAFEGUARDS = [
   { icon: Workflow, h: 'One switch for the model', p: 'Every model call passes through one module, so a model hosted on your own servers can replace the hosted one without changing the checks.' },
 ]
 
-/** "Measured, not claimed": the latest eval run, figures that went badly included. */
+/** "Measured, not claimed": six headline figures from the latest scored run on real policies (every figure, the weak
+ * ones included, is in backend/eval/results). */
 export function Measured() {
   return (
     <section id="measured" className={styles.wrap} data-section="Measured" aria-labelledby="measured-title">
       <div className={styles.head}>
         <h2 id="measured-title" className={styles.h2}>Measured, not claimed.</h2>
         <Reveal as="p" className={styles.lead}>
-          {m.questions} questions with known answers across the seven demo PDFs, scored by a script on {runDate}: amendments, tables,
-          calculations, Hindi, planted contradictions, and questions the documents cannot answer.
+          {m.questions} questions with known answers across ten real Indian health insurance policies, scored by a script on
+          {' '}{runDate}: single-policy and cross-policy questions, calculations, Hindi, contradictions between documents,
+          and questions the documents cannot answer.
         </Reveal>
       </div>
       <ol className={styles.figures}>
@@ -49,7 +51,7 @@ export function Measured() {
         ))}
       </ol>
       <Reveal as="p" className={styles.repro}>
-        <span className="readout">Re-run it</span> <code>uv run python -m scripts.run_eval --ingest</code> rewrites these numbers from a fresh run.
+        <span className="readout">Re-run it</span> <code>uv run python -m scripts.run_eval --gold eval/gold_policies.jsonl</code> rewrites these numbers from a fresh run.
       </Reveal>
     </section>
   )

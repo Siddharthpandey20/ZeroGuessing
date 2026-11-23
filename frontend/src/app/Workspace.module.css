@@ -1,5 +1,6 @@
 /* Hallmark · theme: custom · a module of the ZeroGuess system; the full stamp is line 1 of src/styles/global.css */
-.shell { height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr); background: var(--color-paper); }
+/* --top-h: the top bar's height; the slide-in panels (sources, chats, documents, library detail) open just under it */
+.shell { --top-h: 56px; height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--top-h) minmax(0, 1fr); background: var(--color-paper); }
 .body { min-height: 0; }
 
 .top {
@@ -45,10 +46,14 @@
   .tab { padding: 0 var(--space-sm); }
   .userName { display: none; }
 }
+/* phones: brand, tabs, language and account need ~450px on one row, so the tabs get a full-width row of their own */
 @media (max-width: 30rem) {
-  .brand { font-size: 0.9375rem; }
-  .tab { padding: 0 var(--space-sm); gap: 4px; }
-  .count { display: none; }
+  .shell { --top-h: 100px; }
+  .top { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 52px 44px; row-gap: 0; }
+  .brand { grid-column: 1; grid-row: 1; font-size: 0.9375rem; }
+  .end { grid-column: 2; grid-row: 1; }
+  .tabs { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; align-self: start; }
+  .tab { flex: 1; justify-content: center; padding: 0 var(--space-xs); gap: 4px; }
   .avatarBtn { padding: 0; }
 }
 .end { justify-self: end; display: flex; align-items: center; gap: var(--space-sm); }

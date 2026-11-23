@@ -102,7 +102,8 @@ export type AnswerStatus = 'answered' | 'partial' | 'conflicted' | 'abstained' |
 export interface Answer {
   question: string
   question_en?: string | null
-  lang: 'en' | 'hi'
+  /** the answer's language: hne = Chhattisgarhi (text_hi then holds the Chhattisgarhi sentence) */
+  lang: 'en' | 'hi' | 'hne'
   as_of: string
   status: AnswerStatus
   searched: { docs: number; terms: string[]; evidence: number }
@@ -127,6 +128,8 @@ export interface Answer {
   /** answered with an overview built from the documents' own headings */
   overview?: boolean
   error?: string
+  /** the user pressed Stop before the answer finished */
+  stopped?: boolean
 }
 
 export interface Message {
@@ -136,6 +139,7 @@ export interface Message {
   question: string
   as_of: string
   input_mode: 'typed' | 'camera' | 'voice'
+  reply_lang?: 'hi' | 'hne' | null
   status: 'pending' | 'done' | 'failed' | string
   answer: Answer | null
   created_at: string

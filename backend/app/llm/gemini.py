@@ -37,6 +37,7 @@ class GeminiClient:
         self.embed_model = s.gemini_embed_model
         self.dim = s.embed_dim
         self.timeout = s.llm_timeout_s
+        self.timeout_retries = s.llm_timeout_retries
         self.thinking = s.llm_thinking
 
     async def generate_json(
@@ -81,10 +82,11 @@ class GeminiClient:
                         raise LLMError(str(e)) from e
                     await asyncio.sleep(min(2**attempt, 8))
                 except TimeoutError as e:
-                    # a stalled model rarely recovers within seconds: try the next one instead of waiting again
+                    # retry the same model (llm_timeout_retries), then the next one: a fallback model answers differently
                     last = e
                     log.warning("llm timeout model=%s attempt=%d", model, attempt)
-                    break
+                    if attempt >= self.timeout_retries:
+                        break
         raise LLMError(f"all models failed: {last}")
 
     async def read_image(self, data: bytes, mime: str) -> str:

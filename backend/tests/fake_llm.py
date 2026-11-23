@@ -35,6 +35,7 @@ class FakeLLM:
 
     async def generate_json(self, schema, prompt, system, *, temperature=0.0, thinking=None):
         self.calls.append(schema.__name__)
+        self.system = system or ""
         return getattr(self, f"_{schema.__name__}")(prompt)
 
     # ---------------------------------------------------------------- amendments
@@ -103,7 +104,8 @@ class FakeLLM:
 
     def _Translation(self, prompt):
         import json
-        return Translation(items=[f"(hi) {t}" for t in json.loads(prompt)])
+        tag = "(hne)" if "Chhattisgarhi" in getattr(self, "system", "") else "(hi)"
+        return Translation(items=[f"{tag} {t}" for t in json.loads(prompt)])
 
     def _QueryTranslation(self, prompt):
         return QueryTranslation(english="What is the prepayment penalty?")

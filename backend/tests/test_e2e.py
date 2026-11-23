@@ -45,8 +45,8 @@ async def client():
     await engine.dispose()
 
 
-async def ask(c, chat_id, q, as_of=None):
-    body = {"question": q, **({"as_of": as_of} if as_of else {})}
+async def ask(c, chat_id, q, as_of=None, reply_lang=None):
+    body = {"question": q, **({"as_of": as_of} if as_of else {}), **({"reply_lang": reply_lang} if reply_lang else {})}
     r = await c.post(f"/api/chats/{chat_id}/messages?stream=false", headers=H, json=body)
     assert r.status_code == 200, r.text
     return r.json()
@@ -122,6 +122,17 @@ async def test_pipeline(client):
     a = (await ask(c, chat, "फ्लोटिंग रेट होम लोन पर प्रीपेमेंट पेनल्टी कितनी है?", "2026-11-23"))["answer"]
     assert a["lang"] == "hi" and a["claims"][0]["text_hi"].startswith("(hi)"), a["claims"]
     assert "Nil" in a["claims"][0]["citations"][0]["quote"]
+
+    # Chhattisgarhi picked next to the mic: the same verified answer, written in Chhattisgarhi (Devanagari script
+    # cannot tell it from Hindi, so the request says so); an English question can be answered in it too
+    r = await ask(c, chat, "What is the prepayment penalty on a floating rate home loan?", "2026-11-23", reply_lang="hne")
+    a = r["answer"]
+    assert a["lang"] == "hne" and a["claims"][0]["text_hi"].startswith("(hne)"), a["claims"]
+    assert r["reply_lang"] == "hne"
+    a = (await ask(c, chat, "फ्लोटिंग रेट होम लोन पर प्रीपेमेंट पेनल्टी कतका हे?", "2026-11-23", reply_lang="hne"))["answer"]
+    assert a["lang"] == "hne" and a["question_en"], a
+    a = (await ask(c, chat, "नमस्ते", reply_lang="hne"))["answer"]
+    assert a["status"] == "chat" and a["lang"] == "hne" and "जोहार" in a["reply"], a
 
     # camera: transcribe a photo, then check the clause against the corpus
     t = (await c.post("/api/camera/transcribe", headers=H, files={"image": ("p.png", b"PNG-fake", "image/png")})).json()
@@ -201,7 +212,7 @@ async def test_conflict_verdicts_are_reused_not_reasked(client, monkeypatch):
         while again and rounds < 5:
             await cmod.finish_evidence_check(s, [], again, await cmod.confirm_pairs(again))
             known, again = await cmod.plan_evidence_check(s, r.evidence, values)
-            assert not {frozenset((x.sentence_id, y.sentence_id)) for _, x, y in again} &                 {frozenset((x.sentence_id, y.sentence_id)) for _, x, y in pairs}, "a judged pair came back"
+            assert not {frozenset((x.sentence_id, y.sentence_id)) for _, x, y, _ in again} &                 {frozenset((x.sentence_id, y.sentence_id)) for _, x, y, _ in pairs}, "a judged pair came back"
             pairs, rounds = again or pairs, rounds + 1
         assert again == [], "judged pairs must not go to the model again"
         assert known, "the conflict itself is still reported, from the stored alert"

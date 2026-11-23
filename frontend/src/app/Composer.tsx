@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, AudioLines, Camera, FileText, ImageUp, LoaderCircle, Mic, Paperclip, Square, TriangleAlert, X } from 'lucide-react'
+import { ArrowUp, AudioLines, Camera, Check, ChevronUp, FileText, ImageUp, LoaderCircle, Mic, Paperclip, Square, TriangleAlert, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import { canDictate, canSpeak, dictate, stopSpeaking, type SpeechLang } from '../lib/speech'
+import { canDictate, canSpeak, dictate, saveVoiceLang, savedVoiceLang, stopSpeaking, VOICE_LABEL, VOICE_LANGS, VOICE_NAME, type VoiceLang } from '../lib/speech'
 import { CameraCapture } from './CameraCapture'
 import styles from './Composer.module.css'
 import { tr } from '../lib/i18n'
@@ -15,9 +15,23 @@ export interface Attachment {
   state: 'uploading' | 'working' | 'ready' | 'failed'
   detail?: string | null
 }
-/** speakReply: read the answer aloud when it arrives (voice conversation only). */
+/**
+ * speakReply: read the answer aloud when it arrives (voice conversation only).
+ * replyLang: write the answer in Hindi or Chhattisgarhi (the language picked next to the mic); absent = follow the question.
+ */
 export interface AskOptions {
   speakReply?: boolean
+  replyLang?: 'hi' | 'hne'
+}
+
+/** Each language in its own script, as the menu lists it. */
+const NATIVE_NAME: Record<VoiceLang, string> = { en: 'English', hi: 'हिन्दी', hne: 'छत्तीसगढ़ी' }
+
+/** Prompts shown while listening, in the language being spoken. */
+const LISTEN_NOTE: Record<VoiceLang, { dictate: string; converse: string }> = {
+  en: { dictate: 'Listening… speak your question. Pausing is fine.', converse: 'Listening… ask your question. When you stop, it is sent and the answer is read aloud.' },
+  hi: { dictate: 'सुन रहा हूँ… अपना प्रश्न बोलिए', converse: 'सुन रहा हूँ… रुकते ही प्रश्न भेजा जाएगा और उत्तर पढ़ा जाएगा' },
+  hne: { dictate: 'सुनत हँव… अपन सवाल बोलव', converse: 'सुनत हँव… रुकतेच सवाल भेजे जाही अउ जवाब पढ़ के सुनाए जाही' },
 }
 
 const todayISO = () => {
@@ -30,6 +44,8 @@ const canUseCamera = () => typeof navigator !== 'undefined' && !!navigator.media
 interface Props {
   onSubmit: (question: string, asOf: string, mode: InputMode, opts?: AskOptions) => void
   busy?: boolean
+  /** Stop the answer being produced; while `busy`, the Ask button becomes Stop. */
+  onStop?: () => void
   initial?: { question: string; asOf: string }
   onCancel?: () => void
   autoFocus?: boolean
@@ -51,14 +67,37 @@ const ATTACH_LABEL: Record<Attachment['state'], string> = { uploading: 'Uploadin
  * dictation into the box (you review and press Ask), and a voice conversation (speak, it asks when you pause and
  * reads the answer aloud).
  */
-export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact, submitLabel, onAttach, attachments, onRemoveAttachment, waiting }: Props) {
+export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact, submitLabel, onAttach, attachments, onRemoveAttachment, waiting, onStop }: Props) {
   const [q, setQ] = useState(initial?.question ?? '')
   const [asOf, setAsOf] = useState(initial?.asOf ?? todayISO())
   const [mode, setMode] = useState<InputMode>('typed')
   const [reading, setReading] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [listening, setListening] = useState<'dictate' | 'converse' | null>(null)
-  const [lang, setLang] = useState<SpeechLang>(() => (tr('Ask') === 'Ask' ? 'en-IN' : 'hi-IN')) // a Hindi interface dictates Hindi
+  const [lang, setLangState] = useState<VoiceLang>(() => savedVoiceLang(tr('Ask') !== 'Ask')) // remembered; a Hindi interface starts in Hindi
+  const setLang = (l: VoiceLang) => {
+    setLangState(l)
+    saveVoiceLang(l)
+  }
+  const [langOpen, setLangOpen] = useState(false)
+  const langWrap = useRef<HTMLSpanElement>(null)
+  // the language menu closes on a click outside it or on Escape
+  useEffect(() => {
+    if (!langOpen) return
+    const away = (e: PointerEvent) => {
+      if (!langWrap.current?.contains(e.target as Node)) setLangOpen(false)
+    }
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLangOpen(false)
+    }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('pointerdown', away)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [langOpen])
+  const replyLang = lang === 'en' ? undefined : lang
   const [camera, setCamera] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
   const imagePick = useRef<HTMLInputElement>(null)
@@ -67,7 +106,6 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
   const stopRef = useRef<(() => void) | null>(null)
   const heard = useRef('')
   const mic = canDictate()
-  const hi = lang === 'hi-IN'
 
   useEffect(() => {
     const el = ta.current
@@ -84,7 +122,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
     const text = q.trim()
     if (text.length < 2 || busy || waiting) return
     stopRef.current?.()
-    onSubmit(text, asOf, mode)
+    onSubmit(text, asOf, mode, { replyLang })
     if (!initial) {
       setQ('')
       setMode('typed')
@@ -101,11 +139,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
     stopSpeaking() // never transcribe our own voice
     const before = kind === 'dictate' ? q.trim() : ''
     heard.current = before
-    setNote(
-      kind === 'dictate'
-        ? (hi ? 'सुन रहा हूँ… बोलिए' : tr('Listening… speak your question. Pausing is fine.'))
-        : (hi ? 'सुन रहा हूँ… रुकते ही प्रश्न भेजा जाएगा और उत्तर पढ़ा जाएगा' : 'Listening… ask your question. When you stop, it is sent and the answer is read aloud.'),
-    )
+    setNote(lang === 'en' ? tr(LISTEN_NOTE.en[kind]) : LISTEN_NOTE[lang][kind])
     setListening(kind)
     stopRef.current = dictate(
       lang,
@@ -124,7 +158,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
             return
           }
           if (text.length >= 2 && !busy) {
-            onSubmit(text, asOf, 'voice', { speakReply: canSpeak() })
+            onSubmit(text, asOf, 'voice', { speakReply: canSpeak(), replyLang })
             setQ('')
             setMode('typed')
             setNote(null)
@@ -263,10 +297,27 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
               aria-pressed={listening === 'converse'} aria-label={tr(listening === 'converse' ? 'Stop listening' : 'Voice conversation: speak, and hear the answer')} title={listening === 'converse' ? tr('Stop') : tr('Speak and hear the answer')}>
               {listening === 'converse' ? <Square size={13} strokeWidth={2.4} /> : <AudioLines size={16} strokeWidth={1.8} />}
             </button>
-            <button type="button" className={styles.lang} onClick={() => setLang((l) => (l === 'en-IN' ? 'hi-IN' : 'en-IN'))} disabled={!!listening}
-              aria-label={tr(hi ? 'Speech language: Hindi. Switch' : 'Speech language: English. Switch')} title={tr('Speech language')}>
-              {hi ? 'हि' : 'EN'}
-            </button>
+            <span className={styles.langWrap} ref={langWrap}>
+              <button type="button" className={styles.lang} onClick={() => setLangOpen((o) => !o)} disabled={!!listening}
+                lang={lang === 'en' ? undefined : 'hi'} aria-haspopup="menu" aria-expanded={langOpen}
+                aria-label={tr('Voice and answer language: {name}. Change', { name: VOICE_NAME[lang] })}
+                title={tr('Voice and answer language: {name}', { name: VOICE_NAME[lang] })}>
+                {VOICE_LABEL[lang]} <ChevronUp size={11} strokeWidth={2.4} aria-hidden="true" />
+              </button>
+              {langOpen && (
+                <span className={styles.langMenu} role="menu" aria-label={tr('Voice and answer language')}>
+                  <span className={styles.langHead}>{tr('Speak and answer in')}</span>
+                  {VOICE_LANGS.map((l) => (
+                    <button key={l} type="button" role="menuitemradio" aria-checked={l === lang} className={styles.langItem}
+                      autoFocus={l === lang} onClick={() => { setLang(l); setLangOpen(false) }}>
+                      <span lang={l === 'en' ? 'en' : 'hi'}>{NATIVE_NAME[l]}</span>
+                      {l !== 'en' && <span className={styles.langSub}>{VOICE_NAME[l]}</span>}
+                      {l === lang && <Check size={14} strokeWidth={2.2} className={styles.langCheck} aria-hidden="true" />}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </span>
           </span>
         )}
 
@@ -274,10 +325,18 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
         {onCancel && (
           <button type="button" className="btn btn-quiet btn-sm" onClick={onCancel}>{tr('Cancel')}</button>
         )}
-        <button type="submit" className={`btn btn-primary btn-sm ${styles.send}`} disabled={busy || waiting || q.trim().length < 2}
-          title={waiting ? tr('Wait until the documents are ready') : undefined}>
-          {submitLabel ?? tr('Ask')} <ArrowUp size={15} strokeWidth={2.2} aria-hidden="true" />
-        </button>
+        {busy && onStop ? (
+          // an answer is being produced: the send button becomes Stop, as in ChatGPT
+          <button type="button" className={`btn btn-primary btn-sm ${styles.send}`} onClick={onStop}
+            aria-label={tr('Stop the answer')} title={tr('Stop the answer')}>
+            {tr('Stop')} <Square size={12} strokeWidth={2.6} aria-hidden="true" />
+          </button>
+        ) : (
+          <button type="submit" className={`btn btn-primary btn-sm ${styles.send}`} disabled={busy || waiting || q.trim().length < 2}
+            title={waiting ? tr('Wait until the documents are ready') : undefined}>
+            {submitLabel ?? tr('Ask')} <ArrowUp size={15} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+        )}
       </div>
       {camera && <CameraCapture onCapture={readPhoto} onClose={() => setCamera(false)} />}
     </form>

@@ -58,11 +58,17 @@ async def test_a_stalled_model_hands_over_after_one_timeout():
 
     c = object.__new__(GeminiClient)
     c.client = SimpleNamespace(aio=SimpleNamespace(models=Models()))
-    c.models, c.timeout, c.thinking = ["slow", "fast"], 0.05, ""
+    c.models, c.timeout, c.thinking, c.timeout_retries = ["slow", "fast"], 0.05, "", 0
     t0 = time.perf_counter()
     assert (await c.generate_json(Out, "p", "s")).ok
     assert calls == ["slow", "fast"]
     assert time.perf_counter() - t0 < 1
+
+    # llm_timeout_retries=1: the same model gets exactly one more try (a fallback model drafts differently), never 3
+    calls.clear()
+    c.timeout_retries = 1
+    assert (await c.generate_json(Out, "p", "s")).ok
+    assert calls == ["slow", "slow", "fast"]
 
 
 async def test_short_response_is_an_error_not_silent_truncation():

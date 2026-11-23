@@ -115,10 +115,11 @@
 .close { max-width: var(--container); margin-inline: auto; padding: var(--section-gap) var(--gutter); display: grid; gap: var(--space-lg); justify-items: start; }
 .closeH { font-size: var(--text-display); line-height: var(--leading-display); letter-spacing: var(--tracking-display); font-weight: 560; }
 .closeBody { font-size: var(--text-lead); color: var(--color-ink-2); max-width: 44ch; }
-.footer { max-width: var(--container); margin-inline: auto; padding: 0 var(--gutter) var(--space-xl); display: grid; gap: var(--space-lg); }
+/* minmax(0, 1fr): the wordmark sizes itself to its container, so the column must not grow to fit the mark first */
+.footer { max-width: var(--container); margin-inline: auto; padding: 0 var(--gutter) var(--space-xl); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-lg); }
 .footMark { border-top: var(--rule-hair) solid var(--color-rule-strong); padding-top: var(--space-xl); }
 .footRow { display: flex; flex-wrap: wrap; gap: var(--space-md) var(--space-xl); align-items: center; font-size: var(--text-sm); color: var(--color-ink-2); }
-.footLinks { display: flex; gap: var(--space-lg); margin-left: auto; }
+.footLinks { display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-lg); margin-left: auto; }
 .footLinks a { color: var(--color-ink-2); }
 .footLinks a:hover { color: var(--color-ink); }
 .footLinks a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
@@ -139,6 +140,11 @@
   .checkList { grid-template-columns: minmax(0, 1fr); }
   .checkList li + li { padding-left: 0; border-left: 0; }
   .band { height: 160vh; }
+  .footLinks { margin-left: 0; }
+  /* phones: no answer card; its slot is an empty 4:3 frame that the desk scene stands in (HeroScene, phone branch) */
+  .heroSpecimen { aspect-ratio: 4 / 3; transform: none; transition: none; margin-top: 0; } /* the scene is placed by this box */
+  .heroSpecimen > .tilt { display: none; }
+  .pillB { max-width: calc(100vw - 48px); text-align: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .video, .nav, .heroSpecimen, .lead, .actions, .corner, .h1Word > span, .indexLine, .indexBar > span { transition: none; transform: none; opacity: 1; }

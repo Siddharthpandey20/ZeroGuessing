@@ -1,0 +1,4 @@
+id,category,status,correct,citation_ok,abstained,expected_abstain,contradiction,expected_contradiction,faithfulness,pending_shown,latency_ms,cached,first_answer_ms,tokens_input,tokens_output,tokens_thinking,tokens_cached,tokens_total,llm_calls
+ui11,single_doc,answered,True,True,False,False,False,False,100.0,False,9607,False,9607,3066,192,482,0,3740,2
+xd05,cross_doc,partial,True,True,False,False,False,False,100.0,False,11465,False,11465,4063,1245,771,0,6079,3
+xd07,cross_doc,answered,False,True,False,False,False,False,100.0,False,14622,False,14622,3489,281,871,0,4641,2

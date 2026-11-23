@@ -1,5 +1,6 @@
 /* Hallmark · theme: custom · a module of the ZeroGuess system; the full stamp is line 1 of src/styles/global.css */
 .answer { display: grid; gap: var(--space-md); }
+@media (max-width: 56rem) { .answer { grid-template-columns: minmax(0, 1fr); } } /* phones: never wider than the screen */
 
 /* the answer itself: prose, with a thin lime underline that means "proven" (amber: another clause disagrees) */
 .prose { font-size: 1.0625rem; line-height: 1.75; color: var(--color-ink); text-wrap: pretty; max-width: 68ch; }

@@ -1,0 +1,5 @@
+id,category,status,correct,citation_ok,abstained,expected_abstain,contradiction,expected_contradiction,faithfulness,pending_shown,latency_ms,cached,first_answer_ms,tokens_input,tokens_output,tokens_thinking,tokens_cached,tokens_total,llm_calls
+lg05,single_doc,conflicted,True,True,False,False,True,False,100.0,False,32862,False,32862,3048,267,2589,859,5904,2
+pw01,single_doc,conflicted,True,True,False,False,True,False,100.0,False,9304,False,9304,2993,181,367,863,3541,2
+cv01,contradiction,conflicted,True,True,False,False,True,True,66.7,False,47199,False,47199,3659,1418,1932,0,7009,3
+cv02,contradiction,conflicted,True,True,False,False,True,True,100.0,False,40663,False,40663,3248,234,1143,0,4625,2

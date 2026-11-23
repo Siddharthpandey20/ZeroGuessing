@@ -5,7 +5,7 @@
   display: grid; place-content: center; justify-items: center;
   background: radial-gradient(120% 100% at 70% 20%, var(--color-haze) 0%, var(--color-haze-2) 100%);
   color: var(--color-ink);
-  transition: transform 860ms var(--ease-in-out);
+  transition: transform 760ms var(--ease-in-out);
 }
 .intro[data-state="lift"] { transform: translateY(-101%); }
 .grid {
@@ -26,14 +26,14 @@
 .kicker, .page, .claim, .checks li, .mark, .blocked { opacity: 0; animation: rise 520ms var(--ease-out) forwards; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
 
-.kicker { display: flex; align-items: center; gap: var(--space-xs); margin: 0; font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-2); animation-delay: 80ms; }
+.kicker { display: flex; align-items: center; gap: var(--space-xs); margin: 0; font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-2); animation-delay: 70ms; }
 .pulse { width: 7px; height: 7px; border-radius: 2px; background: var(--color-ink-2); animation: blink 0.9s steps(2, jump-none) infinite; }
 @keyframes blink { 50% { opacity: 0.2; } }
 
 /* a fragment of the source page: warm white sheet, hairline, one highlighted phrase */
 .page {
   margin: 0; padding: var(--space-md) var(--space-lg) var(--space-lg); border-radius: var(--radius-card);
-  background: var(--color-paper-2); box-shadow: var(--shadow-float); animation-delay: 200ms;
+  background: var(--color-paper-2); box-shadow: var(--shadow-float); animation-delay: 175ms;
 }
 .source { display: block; margin-bottom: var(--space-xs); font-size: var(--text-2xs); color: var(--color-muted); }
 .clause { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(1rem, 1.5vw, 1.2rem); line-height: 1.6; color: var(--color-ink); }
@@ -41,19 +41,19 @@
 .hit {
   color: inherit; padding: 0 2px; border-radius: 3px;
   background: linear-gradient(var(--color-accent), var(--color-accent)) no-repeat left center / 0% 100%;
-  animation: sweep 520ms var(--ease-in-out) 900ms forwards;
+  animation: sweep 520ms var(--ease-in-out) 790ms forwards;
 }
 @keyframes sweep { to { background-size: 100% 100%; color: var(--color-accent-ink); } }
 
 .claims { list-style: none; margin: 0; padding: 0 0 0 var(--space-sm); display: grid; gap: var(--space-sm); border-left: var(--rule-hair) solid var(--color-ink-a30); }
 .claim { display: grid; gap: var(--space-xs); }
-.claim[data-k="ok"] { animation-delay: 620ms; }
-.claim[data-k="no"] { animation-delay: 1950ms; }
+.claim[data-k="ok"] { animation-delay: 545ms; }
+.claim[data-k="no"] { animation-delay: 1715ms; }
 .claimText { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--space-sm); font-size: clamp(1.05rem, 1.6vw, 1.3rem); font-weight: 520; letter-spacing: -0.01em; color: var(--color-ink); }
 .cite {
   display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 4px; padding: 0 4px; border-radius: 5px;
   font-size: 11px; font-weight: 600; vertical-align: 2px; color: var(--color-accent-ink);
-  background: var(--color-accent); opacity: 0; animation: fade 300ms ease 1150ms forwards;
+  background: var(--color-accent); opacity: 0; animation: fade 300ms ease 1010ms forwards;
 }
 @keyframes fade { to { opacity: 1; } }
 
@@ -76,22 +76,22 @@
 .struck {
   color: var(--color-ink);
   background: linear-gradient(var(--color-blocked), var(--color-blocked)) no-repeat left 58% / 0% 2px;
-  animation: strike 420ms var(--ease-in-out) 2380ms forwards, dim 420ms ease 2380ms forwards;
+  animation: strike 420ms var(--ease-in-out) 2095ms forwards, dim 420ms ease 2095ms forwards;
 }
 @keyframes strike { to { background-size: 100% 2px; } }
 @keyframes dim { to { color: var(--color-muted); } }
 .blocked {
   padding: 2px 8px; border-radius: var(--radius-chip); font-size: var(--text-2xs); letter-spacing: 0.02em;
-  color: var(--color-blocked); background: var(--color-blocked-soft); box-shadow: inset 0 0 0 var(--rule-hair) color-mix(in oklch, var(--color-blocked) 35%, transparent); animation-delay: 2620ms;
+  color: var(--color-blocked); background: var(--color-blocked-soft); box-shadow: inset 0 0 0 var(--rule-hair) color-mix(in oklch, var(--color-blocked) 35%, transparent); animation-delay: 2305ms;
 }
 
 .mark {
   margin: var(--space-md) 0 0; justify-self: center; font-family: var(--font-outlier); font-size: clamp(2.6rem, 6vw, 4.4rem);
   font-weight: 640; font-variation-settings: "wdth" 112; letter-spacing: -0.02em; line-height: 1; color: var(--color-ink);
-  animation-delay: 2850ms;
+  animation-delay: 2510ms;
 }
 
-.skip { position: absolute; bottom: var(--space-xl); font-size: var(--text-xs); color: var(--color-ink-2); opacity: 0; animation: fade 400ms ease 900ms forwards; }
+.skip { position: absolute; bottom: var(--space-xl); font-size: var(--text-xs); color: var(--color-ink-2); opacity: 0; animation: fade 400ms ease 790ms forwards; }
 
 @media (max-width: 560px) {
   .page { padding: var(--space-sm) var(--space-md) var(--space-md); }

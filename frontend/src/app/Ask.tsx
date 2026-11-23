@@ -13,7 +13,7 @@ import { Composer, type AskOptions, type Attachment, type InputMode } from './Co
 import { Evidence } from './Evidence'
 import { PromptNav, type NavItem } from './PromptNav'
 import { ShareDialog } from './ShareDialog'
-import { consumeSpeak, dismissPending, runAnswer, takeFresh, usePending, type Pending } from './askStore'
+import { consumeSpeak, dismissPending, runAnswer, stopAnswer, takeFresh, usePending, type Pending } from './askStore'
 import styles from './Ask.module.css'
 import { tr } from '../lib/i18n'
 
@@ -100,7 +100,7 @@ export default function Ask() {
     async (question: string, asOf: string, mode: InputMode, opts?: AskOptions) => {
       const id = await ensureChat()
       setAttached([]) // the chips belong to this question; the documents stay in the chat
-      void runAnswer(qc, { chatId: id, path: `/api/chats/${id}/messages`, body: { question, as_of: asOf, input_mode: mode }, turn: null, question, asOf, speakReply: opts?.speakReply })
+      void runAnswer(qc, { chatId: id, path: `/api/chats/${id}/messages`, body: { question, as_of: asOf, input_mode: mode, reply_lang: opts?.replyLang }, turn: null, question, asOf, speakReply: opts?.speakReply })
     },
     [ensureChat, qc],
   )
@@ -387,6 +387,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
   const [switching, setSwitching] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
   const [speaking, setSpeaking] = useState<string | null>(null)
+  const [voiceProblem, setVoiceProblem] = useState<{ id: string; text: string } | null>(null)
   const spokeFor = useRef<string | null>(null)
   const fresh = takeFresh()
   const turns = detail?.turns ?? []
@@ -415,7 +416,11 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
     }
     const s = spokenAnswer(m.answer)
     setSpeaking(m.id)
-    speak(s.text, s.lang, () => setSpeaking((x) => (x === m.id ? null : x)))
+    setVoiceProblem(null)
+    speak(s.text, s.lang, (problem) => {
+      setSpeaking((x) => (x === m.id ? null : x))
+      if (problem) setVoiceProblem({ id: m.id, text: problem })
+    })
   }
 
   // a question asked with the voice-conversation button gets its answer read back once it arrives
@@ -447,10 +452,10 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
       setSwitching(false)
     }
   }
-  const resend = (t: Turn, question: string, asOf: string, mode: InputMode) => {
+  const resend = (t: Turn, question: string, asOf: string, mode: InputMode, opts?: AskOptions) => {
     setEditing(null)
     dropAfter(t.turn)
-    void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}`, method: 'PUT', body: { question, as_of: asOf, input_mode: mode }, turn: t.turn, question, asOf })
+    void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}`, method: 'PUT', body: { question, as_of: asOf, input_mode: mode, reply_lang: opts?.replyLang }, turn: t.turn, question, asOf })
   }
   const regenerate = (t: Turn, m: Message) => {
     dropAfter(t.turn)
@@ -482,7 +487,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                 <header className={styles.qRow}>
                   {editing === t.turn ? (
                     <div className={styles.editBox}>
-                      <Composer compact autoFocus submitLabel={tr('Resend')} initial={{ question: m.question, asOf: m.as_of }} onCancel={() => setEditing(null)} onSubmit={(q, a, mode) => resend(t, q, a, mode)} />
+                      <Composer compact autoFocus submitLabel={tr('Resend')} initial={{ question: m.question, asOf: m.as_of }} onCancel={() => setEditing(null)} onSubmit={(q, a, mode, o) => resend(t, q, a, mode, o)} />
                     </div>
                   ) : (
                     <>
@@ -511,7 +516,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                   {live ? (
                     live.error ? <StreamError p={live} chatId={chatId} /> : <LiveTrace steps={live.trace} stage={live.stage} info={live.info} startedAt={live.startedAt} />
                   ) : m.status === 'failed' || !m.answer || m.answer.error ? (
-                    <FailedAnswer message={(m.answer?.error as string) ?? tr('This answer failed.')} onRetry={() => regenerate(t, m)} />
+                    <FailedAnswer message={(m.answer?.error as string) ?? tr('This answer failed.')} stopped={!!m.answer?.stopped} onRetry={() => regenerate(t, m)} />
                   ) : (
                     <AnswerView answer={m.answer} cropFor={cropFor} onSelect={onSelect} selectedSentence={selectedSentence} fresh={fresh === m.id} />
                   )}
@@ -533,6 +538,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                     </button>
                   </footer>
                 )}
+                {voiceProblem?.id === m.id && <p className={styles.voiceProblem} role="status">{tr(voiceProblem.text)}</p>}
               </article>
             )
           })}
@@ -549,7 +555,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
       </div>
       </div>
       <div className={styles.dock}>
-        <Composer onSubmit={onAsk} onAttach={onAttach} busy={busy} {...attach} />
+        <Composer onSubmit={onAsk} onAttach={onAttach} busy={busy} onStop={() => stopAnswer(qc, chatId)} {...attach} />
       </div>
     </>
   )
@@ -565,7 +571,14 @@ function StreamError({ p, chatId }: { p: Pending; chatId: string }) {
   )
 }
 
-function FailedAnswer({ message, onRetry }: { message: string; onRetry: () => void }) {
+function FailedAnswer({ message, onRetry, stopped }: { message: string; onRetry: () => void; stopped?: boolean }) {
+  if (stopped)
+    return (
+      <div className={styles.failed} role="status">
+        <p className={styles.failedHead}><Square size={14} strokeWidth={2.2} aria-hidden="true" /> {tr('You stopped this answer before it finished.')}</p>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}><RefreshCw size={13} aria-hidden="true" /> {tr('Answer it again')}</button>
+      </div>
+    )
   return (
     <div className={styles.failed} role="alert">
       <p className={styles.failedHead}><TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" /> {tr('No answer was produced, so nothing is shown.')}</p>

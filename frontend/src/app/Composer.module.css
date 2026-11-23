@@ -65,9 +65,19 @@
 /* voice conversation: the lime ring says "this one answers out loud" */
 .converse:not([disabled]) { box-shadow: inset 0 0 0 1.5px var(--color-accent-2); }
 @media (max-width: 30rem) {
-  .lang { display: none; }
   .bar { gap: 2px 0; flex-wrap: wrap; }
   .date { order: 10; padding: 0 2px 0 4px; } /* its own row under the tools */
   .date input { padding: 0 4px; max-width: 118px; }
   .box { padding-right: var(--space-xs); }
 }
+
+/* voice and answer language: a small menu that opens upwards from its chip */
+.langWrap { position: relative; display: inline-flex; }
+.lang { display: inline-flex; align-items: center; gap: 2px; }
+.langMenu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; display: flex; flex-direction: column; min-width: 172px; padding: 4px; border: var(--rule-hair) solid var(--color-rule-strong); border-radius: var(--radius-chip); background: var(--color-paper-2); box-shadow: 0 8px 24px rgb(0 0 0 / 0.14); }
+.langHead { padding: 6px 8px 4px; color: var(--color-ink-2); font: 600 var(--text-2xs)/1.2 var(--font-body); }
+.langItem { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 7px 8px; border: 0; border-radius: calc(var(--radius-chip) - 2px); background: transparent; color: var(--color-ink); font: var(--text-sm)/1.2 var(--font-body); text-align: left; cursor: pointer; }
+.langItem:hover, .langItem:focus-visible { background: color-mix(in srgb, var(--color-ink) 7%, transparent); outline: none; }
+.langItem[aria-checked="true"] { font-weight: 600; }
+.langSub { color: var(--color-ink-2); font-size: var(--text-2xs); font-weight: 400; }
+.langCheck { margin-left: auto; align-self: center; color: var(--color-accent-2, currentColor); }
