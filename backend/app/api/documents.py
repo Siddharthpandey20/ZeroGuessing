@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.access import can_read, daily_limit, limit_message, readable_doc, sees_everything, used_today
+from app.core.amendments import decisions
 from app.core.render import render_crop, render_page
 from app.db import get_session
 from app.ingest.pipeline import DuplicateDocument, create_document, needs_ingest, requeue, run_ingest
@@ -129,7 +130,8 @@ def _page_refusal(data: bytes) -> str | None:
 
 
 async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[tuple[str, bytes]],
-                        source: str = "upload", quota: Quota | None = None) -> list[UploadResult]:
+                        source: str = "upload", quota: Quota | None = None,
+                        uploaded_by: str | None = None) -> list[UploadResult]:
     """Validate, store and queue ingestion for each PDF. A file already stored (same sha256) is reported as a
     duplicate with its existing id, so a chat can link it without ingesting it twice.
 
@@ -151,7 +153,7 @@ async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[
             out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail=refusal))
             continue
         try:
-            doc, job = await create_document(session, data, name, source=source)
+            doc, job = await create_document(session, data, name, source=source, uploaded_by=uploaded_by)
         except DuplicateDocument as d:
             job_id = None
             if needs_ingest(d.doc):  # stored before but its reading failed or was cut off by a restart: read it again
@@ -204,6 +206,13 @@ async def list_documents(
         stmt = stmt.where(Document.title.ilike(f"%{q}%"))
     docs = (await session.execute(stmt)).scalars().all()
     counts = await _counts(session)
+    if not p.is_admin and (decided := await decisions(session, p.user_id)):
+        # S3: the user's own amendment decisions move their counts (proposed -> confirmed / rejected) for them only
+        for am in (await session.execute(select(Amendment).where(Amendment.id.in_(decided)))).scalars():
+            c = counts.setdefault(am.source_doc_id, {})
+            for st, n in ((am.status, -1), (decided[am.id], 1)):
+                if st in ("proposed", "confirmed"):
+                    c[f"n_amendments_{st}"] = c.get(f"n_amendments_{st}", 0) + n
     return [DocumentOut.model_validate(d).model_copy(update=counts.get(d.id, {})) for d in docs]
 
 

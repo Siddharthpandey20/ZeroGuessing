@@ -9,12 +9,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.documents import UploadResult, store_uploads, user_quota
-from app.core.access import charge
+from app.core.access import charge, user_lock
+from app.core.amendments import decisions, effective_status
 from app.core.sanitize import clean_ai_text
 from app.core.answer import answer_question
 from app.db import SessionLocal, get_session
@@ -223,10 +224,11 @@ async def _run(msg_id: str, use_cache: bool = True):
     async with SessionLocal() as session:
         m = await session.get(Message, msg_id)
         try:
-            doc_ids = await _scope(session, await session.get(Chat, m.chat_id))
+            chat = await session.get(Chat, m.chat_id)
+            doc_ids = await _scope(session, chat)
             history = await _history(session, m)
             async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids,
-                                             history=history, reply_lang=m.reply_lang):
+                                             history=history, reply_lang=m.reply_lang, viewer=chat.user_id):
                 if ev["type"] in ("answer", "answer_update"):  # an update follows an early answer once conflicts are checked
                     m.answer, m.status = ev["answer"], "done"
                     await session.commit()
@@ -316,14 +318,17 @@ class ChatDocOut(BaseModel):
     n_amendments_proposed: int = 0  # S3: changes this document makes that wait for a person to confirm
 
 
-async def _chat_docs(session: AsyncSession, chat_id: str) -> list[ChatDocOut]:
+async def _chat_docs(session: AsyncSession, chat_id: str, viewer: str | None = None) -> list[ChatDocOut]:
     rows = (await session.execute(
         select(Document, ChatDocument.added_at).join(ChatDocument, ChatDocument.document_id == Document.id)
         .where(ChatDocument.chat_id == chat_id).order_by(ChatDocument.added_at))).all()
-    proposed = dict((await session.execute(
-        select(Amendment.source_doc_id, func.count()).where(Amendment.status == "proposed",
-                                                            Amendment.source_doc_id.in_([d.id for d, _ in rows]))
-        .group_by(Amendment.source_doc_id))).all()) if rows else {}
+    proposed: dict[str, int] = {}
+    if rows:  # still waiting for this user: proposed, and not decided by them (S3: decisions are per user)
+        decided = await decisions(session, viewer)
+        for a in (await session.execute(select(Amendment).where(
+                Amendment.source_doc_id.in_([d.id for d, _ in rows])))).scalars():
+            if effective_status(a, decided) == "proposed":
+                proposed[a.source_doc_id] = proposed.get(a.source_doc_id, 0) + 1
     return [ChatDocOut(id=d.id, title=d.title, filename=d.filename, page_count=d.page_count, file_size=d.file_size,
                        ingest_status=d.ingest_status, ingest_error=d.ingest_error, added_at=at,
                        hidden_text_ignored=d.hidden_text_ignored or 0, suspicious_text_ignored=d.suspicious_text_ignored or 0,
@@ -341,8 +346,8 @@ async def _link(session: AsyncSession, chat: Chat, results: list[UploadResult]) 
 
 @router.get("/chats/{chat_id}/documents", response_model=list[ChatDocOut])
 async def list_chat_documents(chat_id: str, p: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)):
-    await _chat(session, chat_id, p)
-    return await _chat_docs(session, chat_id)
+    chat = await _chat(session, chat_id, p)
+    return await _chat_docs(session, chat_id, chat.user_id)
 
 
 @router.post("/chats/{chat_id}/documents", response_model=list[UploadResult], status_code=202)
@@ -356,9 +361,10 @@ async def upload_chat_documents(chat_id: str, bg: BackgroundTasks, files: list[U
     if p.is_admin or p.user_id is None:
         return await _link(session, chat, await store_uploads(session, bg, items))
     # one upload per user at a time, from counting to linking: two parallel requests can't both fit under the quota
-    async with _upload_locks.setdefault(p.user_id, asyncio.Lock()):
+    # and across server processes: the database lock (an upload commits as it stores each file)
+    async with _upload_locks.setdefault(p.user_id, asyncio.Lock()), user_lock(p.user_id, "upload"):
         quota = await user_quota(session, p.user_id)
-        results = await store_uploads(session, bg, items, quota=quota)
+        results = await store_uploads(session, bg, items, quota=quota, uploaded_by=p.user_id)
         session.add_all(UsageEvent(user_id=p.user_id, kind="upload") for _ in range(quota.added))
         return await _link(session, chat, results)
 

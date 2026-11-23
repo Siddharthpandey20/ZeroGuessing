@@ -45,6 +45,9 @@ class Document(Base):
     circular_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     issue_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     source: Mapped[str] = mapped_column(String(16), default="upload")  # corpus|upload
+    # the signed-in (non-admin) user whose chat upload first stored this file; None = the shared library: an admin or
+    # service-key upload, or a demo document. A user's upload never changes the library's rules (S3).
+    uploaded_by: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     storage_key: Mapped[str] = mapped_column(Text)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -259,3 +262,13 @@ class UsageEvent(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class AmendmentDecision(Base):
+    """A signed-in user's own confirm / reject of an amendment (S3). It changes that user's answers only: the
+    amendment's `status` is the shared one (set automatically, or by an admin), which other users keep seeing."""
+    __tablename__ = "amendment_decisions"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    amendment_id: Mapped[str] = mapped_column(ForeignKey("amendments.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # confirmed|rejected
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

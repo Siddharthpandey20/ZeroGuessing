@@ -53,7 +53,7 @@ async def check_clause(body: CheckIn, session: AsyncSession = Depends(get_sessio
         if not body.chat_id:
             raise HTTPException(422, "chat_id is required")
         doc_ids = await _scope(session, await _chat(session, body.chat_id, p))
-    r = await retrieve(session, body.text, as_of, doc_ids=doc_ids)
+    r = await retrieve(session, body.text, as_of, doc_ids=doc_ids, viewer=p.user_id)
     scored = sorted(((fuzz.token_set_ratio(body.text.lower(), e.text.lower()), e) for e in r.evidence),
                     key=lambda x: x[0], reverse=True)
     if not scored or scored[0][0] < 90:

@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.amendments import key
+from app.core.amendments import decisions, key
 from app.core.contradictions import alert_view, confirm_pairs, finish_evidence_check, plan_evidence_check
 from app.core.intent import chat_reply, classify, is_followup, overview, resolve_followup
 from app.core.normalise import Value
@@ -113,7 +113,7 @@ def _reply_answer(question: str, reply: str, as_of: date, t0: float, lang: str =
 
 async def answer_question(session: AsyncSession, question: str, as_of: date, use_cache: bool = True,
                           doc_ids: list[str] | None = None, history: list[dict] | None = None,
-                          reply_lang: str | None = None) -> AsyncIterator[dict]:
+                          reply_lang: str | None = None, viewer: str | None = None) -> AsyncIterator[dict]:
     """The full pipeline. `doc_ids`: answer only from these documents (a chat's own); None searches every active one.
     `history`: earlier turns of the chat ({question, answer}), used to understand a follow-up question.
     `reply_lang`: 'hi' or 'hne' (Chhattisgarhi) to answer in that language whatever the question's script; None follows
@@ -175,6 +175,8 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         if resolved != asked:
             yield step("understand", t, resolved=resolved, turns=len(history))
     scope = ",".join(sorted(doc_ids)) if doc_ids is not None else "*"
+    if viewer:  # S3: a user's own amendment decisions change their answers, so they are part of the key
+        scope += "|" + ",".join(f"{k}={v}" for k, v in sorted((await decisions(session, viewer)).items()))
     # the answer language is part of the key: the same question answered in Hindi is not the Chhattisgarhi answer
     cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{lang}|{await corpus_version(session)}".encode()).hexdigest()
     if use_cache and s.answer_cache and (hit := await session.get(AnswerCache, cache_key)):
@@ -198,7 +200,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
 
     yield {"type": "stage", "stage": "retrieving"}
     t = time.perf_counter()
-    r = await retrieve(session, question, as_of, search_text=q_en, doc_ids=doc_ids)
+    r = await retrieve(session, question, as_of, search_text=q_en, doc_ids=doc_ids, viewer=viewer)
     yield step("search", t, docs=r.docs_searched, terms=r.terms, passages=len(r.evidence),
                keyword_hits=r.fts_hits, best_score=round(r.best_dense, 3) if r.best_dense is not None else None,
                threshold=s.min_dense_score, sources=_sources(r))
@@ -225,7 +227,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     values: dict[str, list[Value]] = {}
     for srow in (await session.execute(select(Sentence.id, Sentence.values).where(Sentence.id.in_([e.sentence_id for e in r.evidence])))).all():
         values[srow.id] = [Value(v["type"], v["value"], v.get("period")) for v in srow.values]
-    known, pairs = await plan_evidence_check(session, r.evidence, values, doc_ids=doc_ids)
+    known, pairs = await plan_evidence_check(session, r.evidence, values, doc_ids=doc_ids, viewer=viewer)
     prods = await products(session, {e.doc_id for e in r.evidence})
     titles = {e.doc_id: e.doc_title for e in r.evidence}
     confirming = asyncio.create_task(confirm_pairs(pairs))

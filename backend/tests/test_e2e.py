@@ -3,13 +3,13 @@ contradiction, EMI calculation, edit & resend, shares."""
 
 import httpx
 import pytest
-from sqlalchemy import text
 
-from app.db import Base, engine, init_db
+from app.db import engine, init_db
 from app.ingest.htmlpdf import html_to_pdf
 from app.llm.gemini import set_llm
 from app.main import app
 from tests.fake_llm import FakeLLM
+from tests.conftest import reset_db
 
 H = {"X-API-Key": "test-key"}
 
@@ -32,8 +32,7 @@ KFS = """<h1>Key Facts Statement Home Loan</h1><p>Statement dated 1 May 2026</p>
 @pytest.fixture
 async def client():
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.drop_all)
+        await reset_db(conn)
     await init_db()
     set_llm(FakeLLM())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=60) as c:

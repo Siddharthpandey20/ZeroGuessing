@@ -154,9 +154,10 @@ async def finish_evidence_check(session: AsyncSession, known: list[Contradiction
 
 
 async def plan_evidence_check(session: AsyncSession, evidence: list[Evidence], values: dict[str, list[Value]],
-                              max_pairs: int = 6, doc_ids: list[str] | None = None) -> tuple[list[Contradiction], list]:
+                              max_pairs: int = 6, doc_ids: list[str] | None = None,
+                              viewer: str | None = None) -> tuple[list[Contradiction], list]:
     """DB part of the query-time check: the known alerts touching the evidence, and the candidate pairs to confirm."""
-    links = await chain_keys(session, doc_ids)
+    links = await chain_keys(session, doc_ids, viewer)
     sids = [e.sentence_id for e in evidence]
     known = list((await session.execute(select(Contradiction).where(
         or_(Contradiction.sentence_a.in_(sids), Contradiction.sentence_b.in_(sids))))).scalars().all())

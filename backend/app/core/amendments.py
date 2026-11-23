@@ -17,7 +17,7 @@ from app.config import get_settings
 from app.core.products import issuer_from_text
 from app.core.sanitize import clean_ai_text
 from app.llm.gemini import get_llm
-from app.models import Amendment, Chat, ChatDocument, Clause, Document, Sentence
+from app.models import Amendment, AmendmentDecision, Chat, ChatDocument, Clause, Document, Sentence
 from app.schemas import AmendOut
 
 log = logging.getLogger(__name__)
@@ -50,17 +50,18 @@ def key(doc_id: str, ref: str) -> str:
 # ---------------------------------------------------------------- S3: who may amend what
 async def _groups(session: AsyncSession) -> dict[str, set[str]]:
     """Who holds each document: 'user:<id>' per signed-in user whose chats have it, 'corpus' for the demo set,
-    'library' for the shared library (admin uploads, service chats, or a document no user's chat holds)."""
+    'library' for the shared library (admin and service-key uploads, service chats). A user's upload that no chat holds
+    any more belongs to no group: it can't name a library document, and so never changes one."""
     held: dict[str, set[str]] = {}
     for doc_id, user_id in (await session.execute(
             select(ChatDocument.document_id, Chat.user_id).join(Chat, Chat.id == ChatDocument.chat_id))).all():
         held.setdefault(doc_id, set()).add(f"user:{user_id}" if user_id else "library")
     out = {}
-    for doc_id, source in (await session.execute(select(Document.id, Document.source))).all():
+    for doc_id, source, uploaded_by in (await session.execute(select(Document.id, Document.source, Document.uploaded_by))).all():
         g = set(held.get(doc_id, set()))
         if source == "corpus":
             g.add("corpus")
-        out[doc_id] = g or {"library"}
+        out[doc_id] = g or (set() if uploaded_by else {"library"})
     return out
 
 
@@ -265,16 +266,34 @@ def _eff(a: Amendment) -> date:
     return a.effective_date or a.issue_date or date.min
 
 
-async def _confirmed(session: AsyncSession, doc_ids: list[str] | None = None) -> list[Amendment]:
+async def decisions(session: AsyncSession, viewer: str | None) -> dict[str, str]:
+    """{amendment_id: confirmed|rejected} this user decided for themselves (S3)."""
+    if not viewer:
+        return {}
+    q = select(AmendmentDecision.amendment_id, AmendmentDecision.status).where(AmendmentDecision.user_id == viewer)
+    return dict((await session.execute(q)).all())
+
+
+def effective_status(a: Amendment, mine: dict[str, str]) -> str:
+    """The status this user sees: their own decision, else the shared one."""
+    return mine.get(a.id, a.status)
+
+
+async def _confirmed(session: AsyncSession, doc_ids: list[str] | None = None, viewer: str | None = None,
+                     library_only: bool = True) -> list[Amendment]:
     """Confirmed amendments from active documents; with `doc_ids`, only those issued by a document in that scope
-    (a chat's own documents: a circular that is not in the chat does not change the rule for that chat)."""
-    q = (
-        select(Amendment).join(Document, Document.id == Amendment.source_doc_id)
-        .where(Amendment.status == "confirmed", Document.active.is_(True))
-    )
+    (a chat's own documents: a circular that is not in the chat does not change the rule for that chat). Without a
+    scope (service-key chats, admins' timelines) only the shared library's own amendments apply: no user's private
+    upload changes the rules everyone else is answered from (S3). `viewer`: that user's own decisions win."""
+    q = select(Amendment).join(Document, Document.id == Amendment.source_doc_id).where(Document.active.is_(True))
     if doc_ids is not None:
         q = q.where(Amendment.source_doc_id.in_(doc_ids))
-    return list((await session.execute(q)).scalars().all())
+    elif library_only:
+        q = q.where(Document.uploaded_by.is_(None))
+    mine = await decisions(session, viewer)
+    if not mine:
+        q = q.where(Amendment.status == "confirmed")
+    return [a for a in (await session.execute(q)).scalars().all() if effective_status(a, mine) == "confirmed"]
 
 
 async def clause_status(session: AsyncSession, doc_id: str, clause_ref: str, as_of: date,
@@ -318,18 +337,20 @@ async def clause_status(session: AsyncSession, doc_id: str, clause_ref: str, as_
 
 
 async def statuses_for(session: AsyncSession, refs: list[tuple[str, str]], as_of: date,
-                       doc_ids: list[str] | None = None) -> dict[str, ClauseStatus]:
-    cache = await _confirmed(session, doc_ids)
+                       doc_ids: list[str] | None = None, viewer: str | None = None) -> dict[str, ClauseStatus]:
+    cache = await _confirmed(session, doc_ids, viewer)
     out = {}
     for doc_id, ref in set(refs):
         out[key(doc_id, ref)] = await clause_status(session, doc_id, ref, as_of, cache)
     return out
 
 
-async def chain_keys(session: AsyncSession, doc_ids: list[str] | None = None) -> set[frozenset[str]]:
-    """Pairs of clause keys linked by an amendment (excluded from contradiction alerts)."""
+async def chain_keys(session: AsyncSession, doc_ids: list[str] | None = None,
+                     viewer: str | None = None) -> set[frozenset[str]]:
+    """Pairs of clause keys linked by an amendment (excluded from contradiction alerts). Every confirmed amendment
+    counts here, a user's own included: it only says two clauses are a change, not a conflict."""
     links = set()
-    for a in await _confirmed(session, doc_ids):
+    for a in await _confirmed(session, doc_ids, viewer, library_only=False):
         src = key(a.source_doc_id, a.source_clause_ref or "")
         for t in (a.target_key, a.root_key):
             if t:

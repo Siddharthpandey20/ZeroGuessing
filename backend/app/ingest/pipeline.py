@@ -24,13 +24,14 @@ class DuplicateDocument(Exception):
         self.doc = doc
 
 
-async def create_document(session: AsyncSession, data: bytes, filename: str, source: str = "upload") -> tuple[Document, Job]:
+async def create_document(session: AsyncSession, data: bytes, filename: str, source: str = "upload",
+                          uploaded_by: str | None = None) -> tuple[Document, Job]:
     sha = hashlib.sha256(data).hexdigest()
     existing = (await session.execute(select(Document).where(Document.sha256 == sha))).scalar_one_or_none()
     if existing:
         raise DuplicateDocument(existing)
     doc = Document(title=filename, filename=filename, sha256=sha, source=source, file_size=len(data),
-                   storage_key=f"documents/{sha}.pdf")
+                   storage_key=f"documents/{sha}.pdf", uploaded_by=uploaded_by)
     get_storage().put(doc.storage_key, data)
     session.add(doc)
     await session.flush()

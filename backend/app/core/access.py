@@ -1,18 +1,22 @@
 """Who may see which document (S1), and the daily usage meter (S6).
 
 A document belongs to the people whose chats it is in. Admins and the service key see every document; a signed-in
-viewer sees only the documents linked to their own chats. Anything else answers 404, the same as a document that does
-not exist, so a guessed id reveals nothing.
+viewer sees the documents linked to their own chats, and those their own earlier answers cite. Anything else answers
+404, the same as a document that does not exist, so a guessed id reveals nothing.
 """
 
+import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import Select, exists, func, select
+from sqlalchemy import Select, Text, cast, exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import Chat, ChatDocument, Document, UsageEvent
+from app.db import engine
+from app.models import Chat, ChatDocument, Document, Message, UsageEvent
 from app.security import Principal
 
 
@@ -38,6 +42,19 @@ async def can_read(session: AsyncSession, p: Principal, doc_id: str | None) -> b
     if sees_everything(p):
         return True
     q = select(exists().where(ChatDocument.document_id == doc_id, ChatDocument.chat_id == Chat.id, Chat.user_id == p.user_id))
+    if (await session.execute(q)).scalar():
+        return True
+    return await _cited_for(session, p.user_id, doc_id)
+
+
+async def _cited_for(session: AsyncSession, user_id: str, doc_id: str) -> bool:
+    """A PDF removed from a chat stays readable to that user as the evidence of the answers it already gave there.
+    Matched as a citation field ('"doc_id": "<id>"') in their stored answers: text the user typed (a question that
+    contains an id) is JSON-escaped and can never form that field, so it can't grant access."""
+    if not re.fullmatch(r"[0-9a-f]{32}", doc_id):
+        return False
+    q = select(exists().where(Message.chat_id == Chat.id, Chat.user_id == user_id,
+                              cast(Message.answer, Text).contains(f'"doc_id": "{doc_id}"')))
     return bool((await session.execute(q)).scalar())
 
 
@@ -75,10 +92,25 @@ def limit_message(kind: str) -> str:
 
 async def charge(session: AsyncSession, p: Principal, kind: str, n: int = 1) -> None:
     """Count n uses of `kind` for this user today, or answer 429 when that would pass the daily limit. Admins and the
-    service key are not metered. Committed by the caller's next commit."""
+    service key are not metered. Committed by the caller's next commit.
+
+    Count and insert are one step per user: a lock on the user, held by this transaction until the caller commits (or
+    rolls back), makes a parallel request wait and then count this one. It is a database lock, so it holds across
+    server processes too. The caller must not commit between this call and storing what it charged for."""
     if sees_everything(p):
         return
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"usage:{p.user_id}"})
     if await used_today(session, p.user_id, kind) + n > daily_limit(kind):
         raise HTTPException(429, limit_message(kind))
     session.add_all(UsageEvent(user_id=p.user_id, kind=kind) for _ in range(n))
     await session.flush()
+
+
+@asynccontextmanager
+async def user_lock(user_id: str, what: str) -> AsyncIterator[None]:
+    """One request at a time per user for `what`, across server processes, for work that commits more than once
+    (an upload stores each file as it goes). Held by a transaction on a connection of its own: it ends, and the lock
+    with it, when the block exits, an error or a cancelled request included."""
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"{what}:{user_id}"})
+        yield

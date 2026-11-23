@@ -149,8 +149,9 @@ R_SAFE = re.compile(r"[^\w.]")
 
 
 async def retrieve(session: AsyncSession, question: str, as_of: date, search_text: str | None = None,
-                   doc_ids: list[str] | None = None) -> RetrievalResult:
-    """Hybrid search. `doc_ids` limits it, and the amendment resolution behind it, to one chat's documents."""
+                   doc_ids: list[str] | None = None, viewer: str | None = None) -> RetrievalResult:
+    """Hybrid search. `doc_ids` limits it, and the amendment resolution behind it, to one chat's documents.
+    `viewer`: the signed-in user asking, whose own amendment decisions apply."""
     s = get_settings()
     terms = key_terms(search_text or question)
     dense: list[tuple[str, float]] = []
@@ -181,7 +182,7 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
     sent_ids = await _budget(session, [chunks[c] for c in ranked if c in chunks], terms, s.max_evidence)
     ev = await _load_evidence(session, sent_ids)
 
-    statuses = await statuses_for(session, [(e.doc_id, e.clause_ref) for e in ev], as_of, doc_ids)
+    statuses = await statuses_for(session, [(e.doc_id, e.clause_ref) for e in ev], as_of, doc_ids, viewer)
     # amendment-aware expansion: make sure the version in force (and the amending text) is in front of the drafter
     inject: list[str] = []
     for e in ev:
@@ -194,7 +195,7 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
                     inject.append(h["sentence_id"])
     if inject:
         extra = await _load_evidence(session, inject, injected=True)
-        extra_st = await statuses_for(session, [(x.doc_id, x.clause_ref) for x in extra], as_of, doc_ids)
+        extra_st = await statuses_for(session, [(x.doc_id, x.clause_ref) for x in extra], as_of, doc_ids, viewer)
         for x in extra:
             st = extra_st.get(key(x.doc_id, x.clause_ref))
             if st and st.state != "current":
