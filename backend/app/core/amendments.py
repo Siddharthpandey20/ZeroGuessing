@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from rapidfuzz import fuzz
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -59,6 +59,11 @@ async def _match_doc(session: AsyncSession, ref: str, exclude: str) -> Document 
 
 async def extract_for_document(session: AsyncSession, doc: Document) -> list[Amendment]:
     """Find trigger sentences, ask the LLM for structured amendments, store as proposed/confirmed."""
+    # re-ingest replaces the document's sentences: drop amendments extracted from the old ones (manual entries,
+    # which have no source sentence, are kept) so stale rows can't feed the chain resolver
+    await session.execute(delete(Amendment).where(
+        Amendment.source_doc_id == doc.id, Amendment.source_sentence_id.is_not(None),
+        Amendment.source_sentence_id.not_in(select(Sentence.id).where(Sentence.document_id == doc.id))))
     rows = (
         await session.execute(
             select(Sentence, Clause.clause_ref).join(Clause, Clause.id == Sentence.clause_id)
@@ -158,11 +163,15 @@ def _eff(a: Amendment) -> date:
     return a.effective_date or a.issue_date or date.min
 
 
-async def _confirmed(session: AsyncSession) -> list[Amendment]:
+async def _confirmed(session: AsyncSession, doc_ids: list[str] | None = None) -> list[Amendment]:
+    """Confirmed amendments from active documents; with `doc_ids`, only those issued by a document in that scope
+    (a chat's own documents: a circular that is not in the chat does not change the rule for that chat)."""
     q = (
         select(Amendment).join(Document, Document.id == Amendment.source_doc_id)
         .where(Amendment.status == "confirmed", Document.active.is_(True))
     )
+    if doc_ids is not None:
+        q = q.where(Amendment.source_doc_id.in_(doc_ids))
     return list((await session.execute(q)).scalars().all())
 
 
@@ -206,18 +215,19 @@ async def clause_status(session: AsyncSession, doc_id: str, clause_ref: str, as_
     return st
 
 
-async def statuses_for(session: AsyncSession, refs: list[tuple[str, str]], as_of: date) -> dict[str, ClauseStatus]:
-    cache = await _confirmed(session)
+async def statuses_for(session: AsyncSession, refs: list[tuple[str, str]], as_of: date,
+                       doc_ids: list[str] | None = None) -> dict[str, ClauseStatus]:
+    cache = await _confirmed(session, doc_ids)
     out = {}
     for doc_id, ref in set(refs):
         out[key(doc_id, ref)] = await clause_status(session, doc_id, ref, as_of, cache)
     return out
 
 
-async def chain_keys(session: AsyncSession) -> set[frozenset[str]]:
+async def chain_keys(session: AsyncSession, doc_ids: list[str] | None = None) -> set[frozenset[str]]:
     """Pairs of clause keys linked by an amendment (excluded from contradiction alerts)."""
     links = set()
-    for a in await _confirmed(session):
+    for a in await _confirmed(session, doc_ids):
         src = key(a.source_doc_id, a.source_clause_ref or "")
         for t in (a.target_key, a.root_key):
             if t:

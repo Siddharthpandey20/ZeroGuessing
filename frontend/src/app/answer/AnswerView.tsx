@@ -1,8 +1,9 @@
-import { ArrowRightLeft, CircleSlash, History, Sigma } from 'lucide-react'
+import { useId, useState } from 'react'
+import { ArrowRightLeft, ChevronDown, CircleSlash, History } from 'lucide-react'
 import { CitationChip, type ChipSource } from '../../components/CitationChip'
-import { FaithMeter, type SegmentTone } from '../../components/FaithMeter'
+import type { SegmentTone } from '../../components/FaithMeter'
 import type { Answer, Calculation, Chain, Citation, Claim, Conflict } from '../../lib/types'
-import { distinctChains, fmtDate, inr, shortDoc, STATUS_LABEL, type CropFor, type Selection } from './selection'
+import { distinctChains, fmtDate, inr, shortDoc, type CropFor, type Selection } from './selection'
 import styles from './AnswerView.module.css'
 
 interface Props {
@@ -25,146 +26,268 @@ export function toChip(c: Citation, cropFor: CropFor): ChipSource {
   }
 }
 
+interface Ref {
+  n: number
+  citation: Citation
+  tone: 'proof' | 'conflict'
+}
+
+/** One number per quoted sentence, in reading order, shared by every claim that cites it. */
+function numberCitations(claims: Claim[]): Map<string, Ref> {
+  const refs = new Map<string, Ref>()
+  for (const c of claims)
+    for (const cit of c.citations)
+      if (!refs.has(cit.sentence_id)) refs.set(cit.sentence_id, { n: refs.size + 1, citation: cit, tone: c.verdict === 'conflicted' ? 'conflict' : 'proof' })
+  return refs
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+const endWithStop = (s: string) => (/[.!?।]["”’)]*$/.test(s.trim()) ? s.trim() : `${s.trim()}.`)
+
+/**
+ * The answer reads as prose first; every proof stays one hover or click away: numbered markers (hover shows the
+ * page crop, click opens the evidence panel), one-line notices for conflicts, amendments and blocked claims, and a
+ * quiet footer with the as-of date, the sources and the faithfulness figure.
+ */
 export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh }: Props) {
   const shown = answer.claims.filter((c) => c.verdict === 'supported' || c.verdict === 'conflicted')
   const blocked = answer.claims.filter((c) => c.verdict === 'unsupported' || c.verdict === 'contradicted')
-  const segments = answer.claims.map((c) => c.verdict as SegmentTone)
-  const chains = distinctChains(answer.amendment_chains ?? [])
+  const abstained = answer.status === 'abstained'
+  // a timeline only explains an answer that was given; under "no proof" it is about some other rule
+  const chains = abstained ? [] : distinctChains(answer.amendment_chains ?? [])
   const calcs = (answer.calculations ?? []).filter((c) => c && c.ok)
   const hindi = answer.lang === 'hi'
+  const refs = numberCitations(shown)
   const selectCitation = (c: Citation) => onSelect?.({ kind: 'citation', citation: c, highlight: [c.sentence_id] })
+  const hasNotices = answer.contradictions.length > 0 || chains.length > 0 || blocked.length > 0
 
   return (
-    <div className={styles.answer} data-status={answer.status}>
-      <div className={styles.statusRow}>
-        <span className={styles.status} data-status={answer.status}>
-          <span className={styles.statusDot} aria-hidden="true" />
-          {STATUS_LABEL[answer.status] ?? answer.status}
-        </span>
-        <span className={styles.meta}>
-          Rule in force on {fmtDate(answer.as_of)}
-          {answer.searched ? `, ${answer.searched.docs} documents searched` : ''}
-          {answer.cached ? ', from cache' : answer.timings_ms?.total ? `, ${(answer.timings_ms.total / 1000).toFixed(1)} s` : ''}
-        </span>
-      </div>
-
-      {answer.status === 'abstained' && answer.abstention && (
-        <section className={styles.abstain} aria-label="No proof">
-          <p className={styles.abstainHead}>
-            <CircleSlash size={20} strokeWidth={1.8} aria-hidden="true" /> I don’t have proof for this.
-          </p>
-          <dl className={styles.facts}>
-            {answer.abstention.missing.length > 0 && (
-              <div>
-                <dt>Missing</dt>
-                <dd>
-                  <ul>{answer.abstention.missing.map((m, i) => <li key={i}>{m}</li>)}</ul>
-                </dd>
-              </div>
-            )}
-            {answer.searched && (
-              <div>
-                <dt>Searched</dt>
-                <dd>
-                  {answer.searched.docs} documents for “{answer.searched.terms.join(' ')}”
-                </dd>
-              </div>
-            )}
-            {answer.abstention.closest.length > 0 && (
-              <div>
-                <dt>Closest</dt>
-                <dd className={styles.closest}>
-                  {answer.abstention.closest.map((c) => (
-                    <CitationChip key={c.sentence_id} tone="plain" source={toChip(c, cropFor)} active={selectedSentence === c.sentence_id} onSelect={() => selectCitation(c)} />
-                  ))}
-                  <span className={styles.closestNote}>These passages are related but do not state the answer.</span>
-                </dd>
-              </div>
-            )}
-          </dl>
-        </section>
+    <div className={styles.answer} data-status={answer.status} data-fresh={fresh || undefined}>
+      {abstained && answer.abstention && (
+        <Abstention answer={answer} cropFor={cropFor} selectedSentence={selectedSentence} onCite={selectCitation} />
       )}
 
       {shown.length > 0 && (
-        <ol className={styles.claims}>
+        <p className={styles.prose} lang={hindi ? 'hi' : undefined}>
           {shown.map((c, i) => (
-            <ClaimLine key={i} claim={c} i={i} hindi={hindi} fresh={fresh} cropFor={cropFor} selectedSentence={selectedSentence} onCite={selectCitation}
-              onConflict={() => {
-                const x = answer.contradictions.find((k) => c.conflict_ids?.includes(k.id))
-                if (x) onSelect?.({ kind: 'conflict', conflict: x })
-              }}
-            />
+            <span key={i} className={styles.claimWrap}>
+              <span className={styles.claim} data-verdict={c.verdict} data-active={c.citations.some((x) => x.sentence_id === selectedSentence) || undefined}>
+                {endWithStop(hindi && c.text_hi ? c.text_hi : c.text)}
+              </span>
+              {c.citations.map((cit) => {
+                const r = refs.get(cit.sentence_id)!
+                return (
+                  <CitationChip key={cit.sentence_id} n={r.n} tone={r.tone} source={toChip(cit, cropFor)}
+                    active={selectedSentence === cit.sentence_id} onSelect={() => selectCitation(cit)} />
+                )
+              })}{' '}
+            </span>
           ))}
-        </ol>
+        </p>
+      )}
+
+      {hindi && shown.some((c) => c.text_hi) && (
+        <Disclosure label="Show the English original" kind="original">
+          <p className={styles.original}>{shown.map((c) => endWithStop(c.text)).join(' ')}</p>
+        </Disclosure>
       )}
 
       {calcs.map((calc, i) => <CalcCard key={i} calc={calc} />)}
 
-      {answer.contradictions.length > 0 && (
-        <section className={styles.block} aria-label="Conflicts">
-          <h3 className={styles.blockHead}><ArrowRightLeft size={15} strokeWidth={1.8} aria-hidden="true" /> The documents disagree</h3>
-          {answer.contradictions.map((x) => (
-            <ConflictCard key={x.id} x={x} cropFor={cropFor} onOpen={() => onSelect?.({ kind: 'conflict', conflict: x })} onCite={selectCitation} selectedSentence={selectedSentence} />
-          ))}
-        </section>
-      )}
-
-      {chains.length > 0 && (
-        <section className={styles.block} aria-label="Amendment chain">
-          <h3 className={styles.blockHead}><History size={15} strokeWidth={1.8} aria-hidden="true" /> How this rule changed</h3>
-          {chains.map((ch) => <ChainStrip key={ch.key} chain={ch} onOpen={() => onSelect?.({ kind: 'chain', chain: ch })} />)}
-        </section>
-      )}
-
-      {blocked.length > 0 && (
-        <section className={styles.block} aria-label="Blocked claims">
-          <h3 className={styles.blockHead}><CircleSlash size={15} strokeWidth={1.8} aria-hidden="true" /> Blocked before display</h3>
-          <ol className={styles.blocked}>
-            {blocked.map((c, i) => (
-              <li key={i}>
-                <span className="struck">{hindi && c.text_hi ? c.text_hi : c.text}</span>
-                {c.citations.map((cit) => (
-                  <CitationChip key={cit.sentence_id} tone="blocked" source={toChip(cit, cropFor)} active={selectedSentence === cit.sentence_id} onSelect={() => selectCitation(cit)} />
+      {hasNotices && (
+        <ul className={styles.notices}>
+          {conflictGroups(answer.contradictions).map(([line, xs]) => (
+            <li key={xs[0].id} className={styles.notice} data-tone="conflict">
+              <ArrowRightLeft size={15} strokeWidth={1.8} aria-hidden="true" />
+              <span>
+                {xs.length > 1 ? `${line.slice(0, -1)}, in ${xs.length} places.` : line}{' '}
+                {xs.map((x, k) => (
+                  <span key={x.id}>
+                    {k > 0 && <span aria-hidden="true"> · </span>}
+                    <button type="button" className={styles.link} data-open="conflict" onClick={() => onSelect?.({ kind: 'conflict', conflict: x })}>
+                      {k === 0 ? 'Compare' : k + 1}
+                      <span className="sr-only">{xs.length > 1 ? ` pair ${k + 1}` : ''} side by side</span>
+                    </button>
+                  </span>
                 ))}
-                {c.reason && <span className={styles.reason}>{sentenceCase(c.reason)}</span>}
-              </li>
-            ))}
-          </ol>
-        </section>
+              </span>
+            </li>
+          ))}
+          {chains.map((ch) => (
+            <li key={ch.key} className={styles.notice} data-tone="chain">
+              <History size={15} strokeWidth={1.8} aria-hidden="true" />
+              <span>
+                {chainLine(ch)}{' '}
+                <button type="button" className={styles.link} data-open="chain" onClick={() => onSelect?.({ kind: 'chain', chain: ch })}>
+                  See timeline<span className="sr-only"> of every version</span>
+                </button>
+              </span>
+            </li>
+          ))}
+          {blocked.length > 0 && (
+            <li className={styles.notice} data-tone="blocked">
+              <CircleSlash size={15} strokeWidth={1.8} aria-hidden="true" />
+              <Disclosure label={`${plural(blocked.length, 'claim')} ${blocked.length === 1 ? 'was' : 'were'} blocked.`} action="Show why" kind="blocked">
+                <ol className={styles.blocked}>
+                  {blocked.map((c, i) => (
+                    <li key={i}>
+                      <span className="struck">{hindi && c.text_hi ? c.text_hi : c.text}</span>
+                      {c.citations.map((cit) => (
+                        <CitationChip key={cit.sentence_id} tone="blocked" source={toChip(cit, cropFor)} active={selectedSentence === cit.sentence_id} onSelect={() => selectCitation(cit)} />
+                      ))}
+                      {c.reason && <span className={styles.reason}>{sentenceCase(c.reason)}</span>}
+                    </li>
+                  ))}
+                </ol>
+              </Disclosure>
+            </li>
+          )}
+        </ul>
       )}
 
-      {answer.claims.length > 0 && (
-        <div className={styles.faith}>
-          <FaithMeter segments={segments} pct={answer.faithfulness?.pct ?? null} />
-        </div>
-      )}
+      <Footer answer={answer} refs={refs} selectedSentence={selectedSentence} onCite={selectCitation} />
     </div>
   )
 }
 
-const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+function conflictLine(x: Conflict) {
+  const what = `${x.subject.toLowerCase()}${x.attribute ? ` (${x.attribute})` : ''}`
+  return x.scope === 'intra' || x.a.doc_id === x.b.doc_id
+    ? `Two clauses in one document disagree on ${what}.`
+    : `Two documents disagree on ${what}.`
+}
 
-function ClaimLine({ claim, i, hindi, fresh, cropFor, selectedSentence, onCite, onConflict }: {
-  claim: Claim; i: number; hindi: boolean; fresh?: boolean; cropFor: CropFor; selectedSentence?: string | null
-  onCite: (c: Citation) => void; onConflict: () => void
+/** Pairs that would read as the same sentence share one line, with a numbered link per pair. */
+function conflictGroups(xs: Conflict[]): [string, Conflict[]][] {
+  const groups = new Map<string, Conflict[]>()
+  for (const x of xs) {
+    const line = conflictLine(x)
+    groups.set(line, [...(groups.get(line) ?? []), x])
+  }
+  return [...groups]
+}
+
+const TIMES = ['', 'once', 'twice']
+
+/** "Clause 7.2 changed twice: 2% → 1% → Nil, in force since 1 Jul 2026." */
+function chainLine(ch: Chain) {
+  const ev = ch.events
+  const changes = ev.length - 1
+  const vals = ev.map((e) => keyValue(eventValue(e)))
+  const path = vals.every(Boolean) ? vals.filter((v, i) => i === 0 || v !== vals[i - 1]).join(' → ') : null
+  const current = ev.find((e) => e.state === 'current') ?? ev[ev.length - 1]
+  const since = current?.effective_date ? `, in force since ${fmtDate(current.effective_date)}` : ''
+  return `The rule changed ${TIMES[changes] ?? `${changes} times`}${path ? `: ${path}` : ''}${since}.`
+}
+
+/** The figure a version sets ("2%", "₹500", "Nil"), when it states one. */
+function keyValue(t: string): string | null {
+  if (/\bnil\b|\bno\s+(?:prepayment\s+|foreclosure\s+)?(?:penalty|charge|fee)s?\b/i.test(t)) return 'Nil'
+  const m = t.match(/₹\s?[\d,]+(?:\.\d+)?|\d+(?:\.\d+)?\s?%/)
+  return m ? m[0].replace(/\s/g, '') : null
+}
+
+function Abstention({ answer, cropFor, selectedSentence, onCite }: {
+  answer: Answer; cropFor: CropFor; selectedSentence?: string | null; onCite: (c: Citation) => void
 }) {
-  const conflicted = claim.verdict === 'conflicted'
-  const text = hindi && claim.text_hi ? claim.text_hi : claim.text
+  const a = answer.abstention!
   return (
-    <li className={`${styles.claim}${fresh ? ` ${styles.enter}` : ''}`} style={fresh ? { animationDelay: `${80 * i}ms` } : undefined}>
-      <span className={`${styles.mark}${conflicted ? ` ${styles.markConflict}` : ''}${fresh ? ` ${styles.sweep}` : ''}`} style={fresh ? { animationDelay: `${120 + 80 * i}ms` } : undefined}>
-        {text}
-      </span>{' '}
-      {claim.citations.map((c) => (
-        <CitationChip key={c.sentence_id} tone={conflicted ? 'conflict' : 'proof'} source={toChip(c, cropFor)} active={selectedSentence === c.sentence_id} onSelect={() => onCite(c)} />
-      ))}
-      {hindi && claim.text_hi && <span className={styles.original}>{claim.text}</span>}
-      {conflicted && (
-        <button type="button" className={styles.conflictLink} onClick={onConflict}>
-          Compare the conflicting quotes
-        </button>
+    <section className={styles.abstain} aria-label="No proof">
+      <p className={styles.abstainHead}>
+        <CircleSlash size={20} strokeWidth={1.8} aria-hidden="true" /> I don’t have proof for this.
+      </p>
+      {a.missing.length > 0 && <p className={styles.missing}>{a.missing.map(endWithStop).join(' ')}</p>}
+      {(answer.searched || a.closest.length > 0) && (
+        <Disclosure label="What I searched" kind="searched">
+          <dl className={styles.facts}>
+            {answer.searched && (
+              <div>
+                <dt>Searched</dt>
+                <dd>{plural(answer.searched.docs, 'document')} for “{answer.searched.terms.join(' ')}”</dd>
+              </div>
+            )}
+            {a.closest.length > 0 && (
+              <div>
+                <dt>Closest</dt>
+                <dd className={styles.closest}>
+                  {a.closest.map((c) => (
+                    <CitationChip key={c.sentence_id} tone="plain" source={toChip(c, cropFor)} active={selectedSentence === c.sentence_id} onSelect={() => onCite(c)} />
+                  ))}
+                  <span className={styles.closestNote}>Related passages that do not state the answer.</span>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </Disclosure>
       )}
-    </li>
+    </section>
+  )
+}
+
+function Footer({ answer, refs, selectedSentence, onCite }: {
+  answer: Answer; refs: Map<string, Ref>; selectedSentence?: string | null; onCite: (c: Citation) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const listId = useId()
+  const list = [...refs.values()]
+  const docs = new Set(list.map((r) => r.citation.doc_id)).size
+  const segs = answer.claims.map((c) => c.verdict as SegmentTone)
+  const backed = segs.filter((s) => s === 'supported' || s === 'conflicted').length
+  const pct = answer.faithfulness?.pct
+  return (
+    <footer className={styles.foot}>
+      <p className={styles.footLine}>
+        {list.length > 0 ? (
+          <button type="button" className={styles.footBtn} aria-expanded={open} aria-controls={listId} data-open="sources" onClick={() => setOpen((v) => !v)}>
+            Backed by {plural(list.length, 'quote')} from {plural(docs, 'document')}
+            <ChevronDown size={13} strokeWidth={2} aria-hidden="true" className={styles.chev} />
+          </button>
+        ) : (
+          <span>Checked against the rules</span>
+        )}
+        <span>in force on {fmtDate(answer.as_of)}</span>
+        {segs.length > 0 && typeof pct === 'number' && (
+          <span className={styles.faith} title={`${backed} of ${segs.length} drafted claims backed by a verbatim quote${segs.length - backed ? `; ${segs.length - backed} blocked` : ''}`}>
+            <span className={styles.faithTrack} role="img" aria-label={`${backed} of ${segs.length} drafted claims backed by a quote`}>
+              {segs.map((s, i) => <span key={i} data-tone={s} />)}
+            </span>
+            <span><span className="tnum">{Math.round(pct)}%</span> faithful</span>
+          </span>
+        )}
+      </p>
+      {open && (
+        <ol className={styles.sources} id={listId}>
+          {list.map((r) => (
+            <li key={r.citation.sentence_id}>
+              <button type="button" className={styles.source} data-tone={r.tone} data-active={selectedSentence === r.citation.sentence_id || undefined} onClick={() => onCite(r.citation)}>
+                <span className={styles.sourceN}>{r.n}</span>
+                <span className={styles.sourceDoc}>{shortDoc(r.citation.doc_title)}</span>
+                <span className={styles.sourceWhere}>{r.citation.clause_ref ? `${r.citation.clause_ref}, ` : ''}p.{r.citation.page}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </footer>
+  )
+}
+
+/** A quiet show/hide. With `action`, the label reads as a sentence and the toggle follows it. */
+function Disclosure({ label, action, kind, children }: { label: string; action?: string; kind: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  return (
+    <div className={styles.disclosure}>
+      <span>
+        {action && <>{label} </>}
+        <button type="button" className={styles.link} aria-expanded={open} aria-controls={id} data-open={kind} onClick={() => setOpen((v) => !v)}>
+          {action ? (open ? 'Hide' : action) : label}
+          <ChevronDown size={13} strokeWidth={2} aria-hidden="true" className={styles.chev} />
+        </button>
+      </span>
+      {open && <div id={id} className={styles.disclosed}>{children}</div>}
+    </div>
   )
 }
 
@@ -172,21 +295,21 @@ function CalcCard({ calc }: { calc: Calculation }) {
   const unitLabel = calc.formula.toLowerCase().includes('emi') ? 'per month' : ''
   return (
     <section className={styles.calc} aria-label="Calculation">
-      <div className={styles.calcHead}>
-        <span className={styles.blockHead}><Sigma size={15} strokeWidth={1.8} aria-hidden="true" /> Worked out in code from the cited figures</span>
-        <code className={`${styles.formula} readout`}>{calc.formula}</code>
-      </div>
-      <ol className={styles.steps}>
-        {calc.steps.map((s, i) => (
-          <li key={i}><span className="readout muted">{i + 1}</span><span className="tnum">{s}</span></li>
-        ))}
-      </ol>
       {calc.result !== null && (
         <p className={styles.result}>
           <span className="tnum">{calc.unit === 'INR' ? inr(calc.result) : calc.result}</span>
           {unitLabel && <span className={styles.resultUnit}>{unitLabel}</span>}
         </p>
       )}
+      <Disclosure label="How it was worked out" kind="calc">
+        <code className={`${styles.formula} readout`}>{calc.formula}</code>
+        <ol className={styles.steps}>
+          {calc.steps.map((s, i) => (
+            <li key={i}><span className="readout muted">{i + 1}</span><span className="tnum">{s}</span></li>
+          ))}
+        </ol>
+        <p className={styles.calcNote}>Computed in code from the cited figures, not by the model.</p>
+      </Disclosure>
     </section>
   )
 }

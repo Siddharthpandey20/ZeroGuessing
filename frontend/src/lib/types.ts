@@ -226,3 +226,23 @@ export interface StageEvent {
   evidence?: number
   claims?: number
 }
+
+/** A document linked to one chat (GET /api/chats/{id}/documents). */
+export interface ChatDoc {
+  id: string
+  title: string
+  filename: string
+  page_count: number
+  file_size: number
+  ingest_status: string
+  ingest_error: string | null
+  added_at: string
+}
+
+export interface UploadResult {
+  filename: string
+  document_id: string | null
+  job_id: string | null
+  status: 'queued' | 'duplicate' | 'rejected'
+  detail: string | null
+}

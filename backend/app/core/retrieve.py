@@ -60,18 +60,23 @@ def key_terms(q: str) -> list[str]:
     return [t for t in toks if t not in _STOP and len(t) > 1][:16]
 
 
-async def _dense(session: AsyncSession, qvec: list[float], n: int) -> list[tuple[str, float]]:
+def _scoped(q, doc_ids: list[str] | None):
+    """Limit a chunk/document query to a chat's documents (None: every active document)."""
+    return q if doc_ids is None else q.where(Document.id.in_(doc_ids))
+
+
+async def _dense(session: AsyncSession, qvec: list[float], n: int, doc_ids: list[str] | None = None) -> list[tuple[str, float]]:
     dist = Chunk.embedding.cosine_distance(qvec)
-    rows = await session.execute(
+    rows = await session.execute(_scoped(
         select(Chunk.id, (1 - dist).label("score"))
         .join(Document, Document.id == Chunk.document_id)
-        .where(Document.active.is_(True), Chunk.embedding.is_not(None))
+        .where(Document.active.is_(True), Chunk.embedding.is_not(None)), doc_ids)
         .order_by(dist).limit(n)
     )
     return [(r.id, float(r.score)) for r in rows]
 
 
-async def _fts(session: AsyncSession, terms: list[str], n: int) -> list[tuple[str, float]]:
+async def _fts(session: AsyncSession, terms: list[str], n: int, doc_ids: list[str] | None = None) -> list[tuple[str, float]]:
     if not terms:
         return []
     tsq = " | ".join(re.sub(r"[^\w.]", "", t) for t in terms if re.sub(r"[^\w.]", "", t))
@@ -79,9 +84,9 @@ async def _fts(session: AsyncSession, terms: list[str], n: int) -> list[tuple[st
         return []
     q = func.to_tsquery("simple", tsq)
     rank = func.ts_rank_cd(Chunk.tsv, q)
-    rows = await session.execute(
+    rows = await session.execute(_scoped(
         select(Chunk.id, rank.label("r")).join(Document, Document.id == Chunk.document_id)
-        .where(Document.active.is_(True), Chunk.tsv.op("@@")(q)).order_by(rank.desc()).limit(n)
+        .where(Document.active.is_(True), Chunk.tsv.op("@@")(q)), doc_ids).order_by(rank.desc()).limit(n)
     )
     return [(r.id, float(r.r)) for r in rows]
 
@@ -94,29 +99,26 @@ def rrf(*lists: list[tuple[str, float]], k: int = 60) -> list[str]:
     return sorted(score, key=score.get, reverse=True)
 
 
-async def retrieve(session: AsyncSession, question: str, as_of: date, search_text: str | None = None) -> RetrievalResult:
+async def retrieve(session: AsyncSession, question: str, as_of: date, search_text: str | None = None,
+                   doc_ids: list[str] | None = None) -> RetrievalResult:
+    """Hybrid search. `doc_ids` limits it, and the amendment resolution behind it, to one chat's documents."""
     s = get_settings()
     terms = key_terms(search_text or question)
     dense: list[tuple[str, float]] = []
     try:
         qvec = await get_llm().embed_query(question)
-        dense = await _dense(session, qvec, 50)
+        dense = await _dense(session, qvec, 50, doc_ids)
     except Exception as e:  # keyword search still answers if embeddings are unavailable
         log.warning("dense retrieval unavailable: %s", e)
-    fts = await _fts(session, terms, 50)
+    fts = await _fts(session, terms, 50, doc_ids)
     ranked = rrf(dense, fts, k=s.rrf_k)[: s.retrieve_k]
-    docs_searched = (await session.execute(select(func.count()).select_from(Document).where(Document.active.is_(True)))).scalar_one()
+    docs_searched = (await session.execute(_scoped(select(func.count()).select_from(Document).where(Document.active.is_(True)), doc_ids))).scalar_one()
 
     chunks = {c.id: c for c in (await session.execute(select(Chunk).where(Chunk.id.in_(ranked)))).scalars()} if ranked else {}
-    sent_ids: list[str] = []
-    for cid in ranked:
-        for sid in chunks[cid].sentence_ids if cid in chunks else []:
-            if sid not in sent_ids:
-                sent_ids.append(sid)
-    sent_ids = sent_ids[: s.max_evidence]
+    sent_ids = await _budget(session, [chunks[c] for c in ranked if c in chunks], terms, s.max_evidence)
     ev = await _load_evidence(session, sent_ids)
 
-    statuses = await statuses_for(session, [(e.doc_id, e.clause_ref) for e in ev], as_of)
+    statuses = await statuses_for(session, [(e.doc_id, e.clause_ref) for e in ev], as_of, doc_ids)
     # amendment-aware expansion: make sure the version in force (and the amending text) is in front of the drafter
     inject: list[str] = []
     for e in ev:
@@ -129,7 +131,7 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
                     inject.append(h["sentence_id"])
     if inject:
         extra = await _load_evidence(session, inject, injected=True)
-        extra_st = await statuses_for(session, [(x.doc_id, x.clause_ref) for x in extra], as_of)
+        extra_st = await statuses_for(session, [(x.doc_id, x.clause_ref) for x in extra], as_of, doc_ids)
         for x in extra:
             st = extra_st.get(key(x.doc_id, x.clause_ref))
             if st and st.state != "current":
@@ -139,6 +141,43 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
     for i, e in enumerate(ev):
         e.eid = f"e{i + 1}"
     return RetrievalResult(ev, statuses, dense[0][1] if dense else None, len(fts), terms, docs_searched)
+
+
+PER_CHUNK = 6
+
+
+async def _budget(session: AsyncSession, ranked: list[Chunk], terms: list[str], limit: int) -> list[str]:
+    """Spread the evidence budget across the ranked chunks instead of letting one long chunk (a 25-row fee table)
+    swallow it. Pass 1: each chunk gives its PER_CHUNK sentences that best match the question terms (kept in
+    document order). Pass 2: any budget left goes to the remaining sentences, still in chunk rank order."""
+    all_ids = [sid for ch in ranked for sid in ch.sentence_ids]
+    if not all_ids:
+        return []
+    text = {sid: t.lower() for sid, t in (await session.execute(select(Sentence.id, Sentence.text).where(Sentence.id.in_(all_ids)))).all()}
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def take(sid: str) -> bool:
+        if sid in seen or sid not in text:
+            return len(out) < limit
+        seen.add(sid)
+        out.append(sid)
+        return len(out) < limit
+
+    for ch in ranked:
+        ids = list(ch.sentence_ids)
+        if len(ids) > PER_CHUNK:
+            score = {sid: sum(t in text.get(sid, "") for t in terms) for sid in ids}
+            best = set(sorted(ids, key=lambda sid: (-score[sid], ids.index(sid)))[:PER_CHUNK])
+            ids = [sid for sid in ids if sid in best]
+        for sid in ids:
+            if not take(sid):
+                return out
+    for ch in ranked:
+        for sid in ch.sentence_ids:
+            if not take(sid):
+                return out
+    return out
 
 
 async def _load_evidence(session: AsyncSession, sent_ids: list[str], injected: bool = False) -> list[Evidence]:

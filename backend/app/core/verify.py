@@ -20,7 +20,11 @@ JUDGE_SYSTEM = (
     "You are a strict verifier for a legal/financial document assistant. For each claim decide whether the quoted "
     "evidence ALONE proves it. 'entailed' only if every part of the claim is stated or directly implied by the quotes. "
     "'contradicted' if the quotes state something incompatible. Otherwise 'neutral'. Do not use outside knowledge. "
-    "Different conditions or scope (e.g. fixed vs floating rate, individual vs business) mean NOT entailed."
+    "Different conditions or scope (e.g. fixed vs floating rate, individual vs business) mean NOT entailed. "
+    "The label after each quote (document, clause, page, and its status on the as-of date: CURRENT, SUPERSEDED, "
+    "NOT YET EFFECTIVE, DELETED) is part of the evidence. A claim may attribute itself to that source, by its document "
+    "name, reference or circular number, clause, or status; such attribution is not a fact the quote text must repeat. "
+    "Judge only the substance: the rule, number, date, condition or eligibility the claim asserts."
 )
 
 
@@ -97,7 +101,10 @@ async def _judge(out: list[VerifiedClaim], idxs: list[int], draft: Draft, by_eid
     blocks = []
     for n, i in enumerate(idxs):
         claim = out[i]
-        q = "\n".join(f'  - "{c["quote"]}" ({c["doc_title"]}, {c["clause_ref"]}, p.{c["page"]})' for c in claim.citations)
+        q = "\n".join(
+            f'  - "{c["quote"]}" ({c["doc_title"]}, {c["clause_ref"]}, p.{c["page"]}, '
+            f'{(c.get("status_note") or c.get("status") or "current").upper()})'
+            for c in claim.citations)
         blocks.append(f"[{n}] CLAIM: {claim.text}\n  QUOTES:\n{q}")
     prompt = "Judge each claim.\n\n" + "\n\n".join(blocks)
     try:

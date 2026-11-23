@@ -62,7 +62,9 @@ def _digits(s: str) -> list[str]:
     return sorted(re.findall(r"\d+(?:[.,]\d+)*", s))
 
 
-async def answer_question(session: AsyncSession, question: str, as_of: date, use_cache: bool = True) -> AsyncIterator[dict]:
+async def answer_question(session: AsyncSession, question: str, as_of: date, use_cache: bool = True,
+                          doc_ids: list[str] | None = None) -> AsyncIterator[dict]:
+    """The full pipeline. `doc_ids`: answer only from these documents (a chat's own); None searches every active one."""
     t0 = time.perf_counter()
     timings: dict[str, int] = {}
 
@@ -72,7 +74,16 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         return now
 
     s = get_settings()
-    cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{await corpus_version(session)}".encode()).hexdigest()
+    if doc_ids is not None and not doc_ids:
+        r = RetrievalResult([], {}, None, 0, [], 0)
+        yield {"type": "answer", "answer": {
+            "question": question, "question_en": None, "lang": "hi" if DEVANAGARI.search(question) else "en", "as_of": as_of.isoformat(),
+            "searched": {"docs": 0, "terms": [], "evidence": 0},
+            **_abstain(r, [], ["this chat has no documents yet: upload a PDF to the chat, then ask again"]),
+            "timings_ms": {"total": int((time.perf_counter() - t0) * 1000)}}}
+        return
+    scope = ",".join(sorted(doc_ids)) if doc_ids is not None else "*"
+    cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{await corpus_version(session)}".encode()).hexdigest()
     if use_cache and s.answer_cache and (hit := await session.get(AnswerCache, cache_key)):
         yield {"type": "answer", "answer": {**hit.answer, "cached": True}}
         return
@@ -89,7 +100,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
 
     yield {"type": "stage", "stage": "retrieving"}
     t = time.perf_counter()
-    r = await retrieve(session, question, as_of, search_text=q_en)
+    r = await retrieve(session, question, as_of, search_text=q_en, doc_ids=doc_ids)
     t = tick("retrieve", t)
 
     base = {"question": question, "question_en": q_en if lang == "hi" else None, "lang": lang, "as_of": as_of.isoformat(),
@@ -120,7 +131,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     values: dict[str, list[Value]] = {}
     for srow in (await session.execute(select(Sentence.id, Sentence.values).where(Sentence.id.in_([e.sentence_id for e in r.evidence])))).all():
         values[srow.id] = [Value(v["type"], v["value"], v.get("period")) for v in srow.values]
-    contras = await check_evidence(session, r.evidence, values)
+    contras = await check_evidence(session, r.evidence, values, doc_ids=doc_ids)
     cited = {c["sentence_id"] for vc in claims for c in vc.citations}
     relevant = [c for c in contras if c.sentence_a in cited or c.sentence_b in cited]
     for vc in claims:
@@ -152,7 +163,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     out["cached"] = False
 
     if s.answer_cache:
-        session.add(AnswerCache(key=cache_key, answer=out))
+        await session.merge(AnswerCache(key=cache_key, answer=out))  # upsert: "run again" re-answers an already-cached key
         await session.commit()
     yield {"type": "answer", "answer": out}
 

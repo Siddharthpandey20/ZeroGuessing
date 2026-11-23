@@ -11,8 +11,8 @@ from app.config import get_settings
 from app.core.render import render_crop, render_page
 from app.db import get_session
 from app.ingest.pipeline import DuplicateDocument, create_document, run_ingest
-from app.models import Amendment, Clause, Contradiction, Document, Job, Sentence
-from app.security import require_admin
+from app.models import Amendment, Chat, ChatDocument, Clause, Contradiction, Document, Job, Sentence
+from app.security import Principal, get_principal, require_admin
 from app.storage import get_storage
 
 router = APIRouter(tags=["documents"])
@@ -63,11 +63,16 @@ class DocumentPatch(BaseModel):
 async def upload_documents(
     bg: BackgroundTasks, files: list[UploadFile] = File(...), session: AsyncSession = Depends(get_session)
 ):
+    return await store_uploads(session, bg, [(f.filename or "document.pdf", await f.read()) for f in files])
+
+
+async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[tuple[str, bytes]],
+                        source: str = "upload") -> list[UploadResult]:
+    """Validate, store and queue ingestion for each PDF. A file already stored (same sha256) is reported as a
+    duplicate with its existing id, so a chat can link it without ingesting it twice."""
     limit = get_settings().max_upload_mb * 1024 * 1024
     out = []
-    for f in files:
-        data = await f.read()
-        name = f.filename or "document.pdf"
+    for name, data in items:
         if not data.startswith(b"%PDF"):
             out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail="not a PDF"))
             continue
@@ -75,7 +80,7 @@ async def upload_documents(
             out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail="file too large"))
             continue
         try:
-            doc, job = await create_document(session, data, name)
+            doc, job = await create_document(session, data, name, source=source)
         except DuplicateDocument as d:
             out.append(UploadResult(filename=name, document_id=d.doc.id, job_id=None, status="duplicate"))
             continue
@@ -106,9 +111,13 @@ async def _counts(session: AsyncSession) -> dict[str, dict[str, int]]:
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents(
-    doc_type: str | None = None, q: str | None = None, session: AsyncSession = Depends(get_session)
+    doc_type: str | None = None, q: str | None = None, session: AsyncSession = Depends(get_session),
+    p: Principal = Depends(get_principal),
 ):
     stmt = select(Document).order_by(Document.uploaded_at.desc())
+    if not p.is_admin:  # a viewer sees the documents in their own chats, not everyone's uploads
+        mine = select(ChatDocument.document_id).join(Chat, Chat.id == ChatDocument.chat_id).where(Chat.user_id == p.user_id)
+        stmt = stmt.where(Document.id.in_(mine))
     if doc_type:
         stmt = stmt.where(Document.doc_type == doc_type)
     if q:

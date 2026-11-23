@@ -101,3 +101,82 @@ async def test_domain_restriction_and_config(client, monkeypatch):
     assert (await client.post("/api/auth/google", json={"credential": "x:staff@bank.example"})).status_code == 200
     cfg = (await client.get("/api/auth/config")).json()
     assert cfg["google_client_id"].endswith("googleusercontent.com") and cfg["password_login"] is True
+
+
+# ---------------------------------------------------------------- the real Google verifier (only the cert download is faked)
+REAL_VERIFY = auth_api.verify_google_token  # captured before the fixture swaps in the stub
+
+
+def _google_like_token(aud: str, iat_offset: int = 0, iss: str = "https://accounts.google.com"):
+    """An RS256 ID token shaped like the one GIS hands the browser, signed by a throwaway key, plus that key's public PEM."""
+    import time
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from google.auth import crypt, jwt as g_jwt
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    pub = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    now = int(time.time()) + iat_offset
+    claims = {"iss": iss, "aud": aud, "sub": "g-real-1", "email": "Real.User@Gmail.Example", "email_verified": True,
+              "name": "Real User", "iat": now, "exp": now + 3600}
+    token = g_jwt.encode(crypt.RSASigner.from_string(priv, key_id="k1"), claims)
+    return token.decode(), {"k1": pub.decode()}
+
+
+async def test_real_google_verifier_audience_skew_and_cookies(client, monkeypatch):
+    from google.auth import exceptions as g_exc
+    from google.oauth2 import id_token as g_id
+
+    cid = get_settings().google_client_id
+    monkeypatch.setattr(auth_api, "verify_google_token", REAL_VERIFY)
+
+    # Google's clock 5s ahead of ours (iat in our future): google-auth's default skew of 0 rejects this
+    tok, certs = _google_like_token(cid, iat_offset=5)
+    monkeypatch.setattr(g_id, "_fetch_certs", lambda req, url: certs)
+    r = await client.post("/api/auth/google", json={"credential": tok})
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["email"] == "real.user@gmail.example" and r.json()["user"]["role"] == "viewer"
+    assert {"zg_access", "zg_refresh"} <= set(r.cookies.keys())
+    set_cookies = r.headers.get_list("set-cookie")
+    assert any(h.startswith("zg_refresh=") and "Path=/api/auth" in h and "HttpOnly" in h for h in set_cookies)
+    assert any(h.startswith("zg_access=") and "Path=/" in h and "SameSite=lax" in h and "Secure" not in h for h in set_cookies)
+    me = await client.get("/api/auth/me")  # the access cookie alone authenticates
+    assert me.status_code == 200 and me.json()["email"] == "real.user@gmail.example"
+
+    # token minted for another OAuth client: 401 with a message a person can act on
+    tok, certs = _google_like_token("someone-else.apps.googleusercontent.com")
+    monkeypatch.setattr(g_id, "_fetch_certs", lambda req, url: certs)
+    r = await client.post("/api/auth/google", json={"credential": tok})
+    assert r.status_code == 401 and "different Google client ID" in r.json()["detail"]
+
+    # not issued by Google
+    tok, certs = _google_like_token(cid, iss="https://evil.example")
+    monkeypatch.setattr(g_id, "_fetch_certs", lambda req, url: certs)
+    assert (await client.post("/api/auth/google", json={"credential": tok})).status_code == 401
+
+    # Google's certs unreachable: 503, not a bare 500
+    def offline(req, url):
+        raise g_exc.TransportError("no network")
+
+    monkeypatch.setattr(g_id, "_fetch_certs", offline)
+    r = await client.post("/api/auth/google", json={"credential": tok})
+    assert r.status_code == 503 and "reach Google" in r.json()["detail"]
+
+
+def test_client_id_is_trimmed():
+    from app.config import Settings
+
+    assert Settings(google_client_id='  "abc.apps.googleusercontent.com" ').google_client_id == "abc.apps.googleusercontent.com"
+
+
+def test_empty_jwt_secret_falls_back_in_dev_and_fails_in_production():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.config import DEV_JWT_SECRET, Settings
+
+    assert Settings(jwt_secret="", cookie_secure=False).jwt_secret == DEV_JWT_SECRET
+    with _pytest.raises(ValidationError, match="JWT_SECRET is empty"):
+        Settings(jwt_secret="  ", cookie_secure=True)

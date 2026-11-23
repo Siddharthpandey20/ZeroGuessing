@@ -6,15 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.contradictions import alert_view, scan_document
 from app.db import SessionLocal, get_session
-from app.models import Contradiction, Document
-from app.security import require_admin
+from app.models import Chat, ChatDocument, Contradiction, Document, Sentence
+from app.security import Principal, get_principal, require_admin
 
 router = APIRouter(tags=["alerts"])
 
 
 @router.get("/alerts")
-async def list_alerts(session: AsyncSession = Depends(get_session)):
-    contras = (await session.execute(select(Contradiction).order_by(Contradiction.created_at.desc()))).scalars().all()
+async def list_alerts(session: AsyncSession = Depends(get_session), p: Principal = Depends(get_principal)):
+    q = select(Contradiction).order_by(Contradiction.created_at.desc())
+    if not p.is_admin:  # a viewer sees conflicts between documents in their own chats only
+        mine = select(ChatDocument.document_id).join(Chat, Chat.id == ChatDocument.chat_id).where(Chat.user_id == p.user_id)
+        in_mine = select(Sentence.id).where(Sentence.document_id.in_(mine))
+        q = q.where(Contradiction.sentence_a.in_(in_mine), Contradiction.sentence_b.in_(in_mine))
+    contras = (await session.execute(q)).scalars().all()
     return await alert_view(session, list(contras))
 
 

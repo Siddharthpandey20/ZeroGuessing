@@ -23,6 +23,26 @@
 .chip[data-tone="plain"] .glyph { background: var(--color-paper-3); }
 .text { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; }
 
+/* numbered marker inside prose: small, quiet, a larger invisible hit area for touch */
+.mark {
+  position: relative; display: inline-grid; place-items: center;
+  min-width: 1.45em; height: 1.45em; padding: 0 0.3em; margin: 0 0.06em;
+  vertical-align: 0.32em;
+  border: 0; border-radius: 6px;
+  background: var(--color-paper-3); color: var(--color-ink-2);
+  font: 600 0.66em/1 var(--font-body); font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  box-shadow: inset 0 -2px 0 var(--color-accent-2);
+  transition: background-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out);
+}
+.mark::before { content: ""; position: absolute; inset: -8px -4px; }
+.mark[data-tone="conflict"] { box-shadow: inset 0 -2px 0 var(--color-conflict); }
+.mark[data-tone="blocked"] { box-shadow: inset 0 -2px 0 var(--color-blocked); }
+.mark[data-tone="plain"] { box-shadow: none; }
+.mark:hover, .mark[data-active] { background: var(--color-ink); color: var(--color-paper-2); }
+.mark:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .mark { transition: none; } }
+
 .pop {
   width: 520px; max-width: 100%;
   padding: var(--space-md);

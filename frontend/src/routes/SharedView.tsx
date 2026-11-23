@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { Answer } from '../lib/types'
-import { AnswerView } from '../app/answer/AnswerView'
+import { AnswerView, ChainStrip, ConflictCard } from '../app/answer/AnswerView'
 import { fmtDate, fmtDateTime, type Selection } from '../app/answer/selection'
 import styles from './SharedView.module.css'
 
@@ -69,6 +69,15 @@ export default function SharedView() {
             </div>
             {cropFor(quote.sentence_id) && <img className="crop" src={cropFor(quote.sentence_id)} alt="" />}
             <p>“{quote.quote}”</p>
+          </div>
+        )}
+        {(open?.kind === 'conflict' || open?.kind === 'chain') && (
+          <div className={`${styles.quoteBox} ${styles.wideBox}`} role="dialog" aria-label={open.kind === 'conflict' ? 'Conflicting clauses' : 'Every version of this rule'}>
+            <div className={styles.quoteHead}>
+              <span>{open.kind === 'conflict' ? 'Conflicting clauses' : 'Every version of this rule'}</span>
+              <button type="button" className="btn btn-quiet btn-sm" onClick={() => setOpen(null)}>Close</button>
+            </div>
+            {open.kind === 'conflict' ? <ConflictCard x={open.conflict} cropFor={cropFor} /> : <ChainStrip chain={open.chain} vertical />}
           </div>
         )}
       </main>

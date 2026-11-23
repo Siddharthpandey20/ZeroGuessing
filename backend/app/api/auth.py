@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from google.auth import exceptions as g_exceptions
 from google.auth.transport import requests as g_requests
 from google.oauth2 import id_token as g_id_token
 from pydantic import BaseModel, EmailStr, Field
@@ -51,15 +52,25 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+GOOGLE_CLOCK_SKEW_S = 10  # google-auth defaults to 0: a PC clock a second behind Google fails a fresh token ("used too early")
+
+
 def verify_google_token(credential: str) -> dict:
     """Checks Google's signature, audience (our client id), issuer and expiry. Separate function so tests can stub it."""
     cid = get_settings().google_client_id
     if not cid:
         raise HTTPException(503, "Google sign-in is not configured (GOOGLE_CLIENT_ID)")
     try:
-        return g_id_token.verify_oauth2_token(credential, _g_req, cid)
-    except ValueError as e:
-        raise HTTPException(401, f"invalid Google token: {e}")
+        return g_id_token.verify_oauth2_token(credential, _g_req, cid, clock_skew_in_seconds=GOOGLE_CLOCK_SKEW_S)
+    except g_exceptions.TransportError:  # not a ValueError: would surface as a bare 500
+        raise HTTPException(503, "Could not reach Google to verify the sign-in. Try again.")
+    except (ValueError, g_exceptions.GoogleAuthError) as e:  # wrong issuer raises GoogleAuthError, not ValueError
+        msg = str(e)
+        if "audience" in msg.lower():
+            msg = "this token was issued for a different Google client ID than the server's GOOGLE_CLIENT_ID"
+        elif "too early" in msg.lower() or "expired" in msg.lower():
+            msg += " (check that this computer's clock is synced)"
+        raise HTTPException(401, f"Google sign-in failed: {msg}")
 
 
 async def _issue(session: AsyncSession, user: User, response: Response) -> TokenOut:

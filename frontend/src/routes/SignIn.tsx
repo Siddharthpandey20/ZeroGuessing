@@ -28,16 +28,32 @@ declare global {
   }
 }
 
+// One script tag and one initialize() per page load, whatever StrictMode or remounts do.
+let gisLoading: Promise<void> | null = null
 function loadGoogle(): Promise<void> {
   if (window.google?.accounts) return Promise.resolve()
-  return new Promise((resolve, reject) => {
+  gisLoading ??= new Promise<void>((resolve, reject) => {
     const s = document.createElement('script')
     s.src = 'https://accounts.google.com/gsi/client'
     s.async = true
     s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Google sign-in could not load'))
+    s.onerror = () => {
+      gisLoading = null // let a later visit retry
+      s.remove()
+      reject(new Error('Google sign-in could not load'))
+    }
     document.head.appendChild(s)
   })
+  return gisLoading
+}
+
+// GIS keeps the callback given to the first initialize(); route it through a ref so the live component handles it.
+let gisInitFor: string | null = null
+const gisHandler: { current: ((credential: string) => void) | null } = { current: null }
+function initGoogle(clientId: string) {
+  if (gisInitFor === clientId || !window.google) return
+  window.google.accounts.id.initialize({ client_id: clientId, callback: ({ credential }) => gisHandler.current?.(credential) })
+  gisInitFor = clientId
 }
 
 export default function SignIn() {
@@ -51,40 +67,59 @@ export default function SignIn() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const gRef = useRef<HTMLDivElement>(null)
+  const [gError, setGError] = useState<string | null>(null)
+  const [gisState, setGisState] = useState<'loading' | 'ready' | 'failed'>('loading')
 
   const done = (u: User) => {
     setUser(u)
     nav(next, { replace: true })
   }
 
+  gisHandler.current = async (credential: string) => {
+    setGError(null)
+    setBusy(true)
+    try {
+      done((await post<TokenOut>('/api/auth/google', { credential })).user)
+    } catch (e) {
+      setGError(e instanceof ApiError ? e.message : 'Google sign-in failed. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => {
     const id = cfg.data?.google_client_id
-    if (!id || !gRef.current) return
+    const host = gRef.current
+    if (!id || !host) return
     let cancelled = false
+    let drawnAt = 0
+    // GIS draws a fixed-width iframe (200 to 400px). Draw it at the container's width, and only once that width
+    // is real: rendering into a hidden or 0px box gives a collapsed button.
+    const draw = () => {
+      const w = Math.round(host.getBoundingClientRect().width)
+      if (cancelled || !window.google || w < 1 || Math.abs(w - drawnAt) < 2) return
+      drawnAt = w
+      window.google.accounts.id.renderButton(host, {
+        type: 'standard', theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', logo_alignment: 'center',
+        width: Math.max(200, Math.min(400, w)),
+      })
+      setGisState('ready')
+    }
+    const ro = new ResizeObserver(() => draw())
     loadGoogle()
       .then(() => {
-        if (cancelled || !gRef.current || !window.google) return
-        window.google.accounts.id.initialize({
-          client_id: id,
-          callback: async ({ credential }) => {
-            setError(null)
-            setBusy(true)
-            try {
-              done((await post<TokenOut>('/api/auth/google', { credential })).user)
-            } catch (e) {
-              setError(e instanceof ApiError ? e.message : 'Google sign-in failed. Try again.')
-            } finally {
-              setBusy(false)
-            }
-          },
-        })
-        window.google.accounts.id.renderButton(gRef.current, { theme: 'outline', size: 'large', shape: 'pill', width: 320, text: 'continue_with' })
+        if (cancelled) return
+        initGoogle(id)
+        draw()
+        ro.observe(host)
       })
-      .catch(() => setError('Google sign-in could not load. Use email and password instead.'))
+      .catch(() => {
+        if (!cancelled) setGisState('failed')
+      })
     return () => {
       cancelled = true
+      ro.disconnect()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cfg.data?.google_client_id])
 
   if (!loading && user) return <Navigate to={next} replace />
@@ -119,8 +154,15 @@ export default function SignIn() {
           <p className={styles.sub}>Use your work account. Documents stay on this deployment.</p>
 
           {google ? (
-            <div className={styles.google}>
-              <div ref={gRef} className={styles.gBtn} aria-label="Continue with Google" />
+            <div className={styles.google} aria-busy={gisState === 'loading' || busy}>
+              {gisState !== 'failed' && (
+                <div ref={gRef} className={styles.gBtn} data-state={gisState} aria-label="Continue with Google" />
+              )}
+              {gisState === 'failed' && (
+                <p className={styles.error} role="alert">Google sign-in could not load (blocked or offline). Use email and password instead.</p>
+              )}
+              {busy && <p className={styles.gNote} role="status">Checking your Google account</p>}
+              {gError && <p className={styles.error} role="alert">{gError}</p>}
             </div>
           ) : (
             !cfg.isLoading && (

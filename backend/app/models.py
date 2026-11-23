@@ -166,6 +166,14 @@ class Chat(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ChatDocument(Base):
+    """Documents a chat answers from. A file uploaded to two chats is stored and ingested once (sha256), linked twice."""
+    __tablename__ = "chat_documents"
+    chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"), primary_key=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True, index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Message(Base):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)

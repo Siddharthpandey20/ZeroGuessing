@@ -26,7 +26,23 @@
 .thread { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: var(--color-paper); }
 .threadTop { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-lg); border-bottom: var(--rule-hair) solid var(--color-rule); min-height: 53px; }
 .railToggle { display: none; }
-.chatTitle { flex: 1; min-width: 0; font-family: var(--font-body); font-size: var(--text-sm); font-weight: 600; color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chatTitle { min-width: 0; font-family: var(--font-body); font-size: var(--text-sm); font-weight: 600; color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+h1.chatTitle:only-of-type { flex: 1; }
+/* the chat's short name, renamed in place */
+.titleRow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.titleRow .chatTitle { cursor: text; }
+.rename { opacity: 0.55; flex: none; }
+.titleRow:hover .rename, .rename:focus-visible { opacity: 1; }
+.renameErr { font-size: var(--text-2xs); color: var(--color-blocked); white-space: nowrap; }
+.titleInput { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: var(--rule-hair) solid var(--color-ink-2); border-radius: var(--radius-chip); background: var(--color-paper-2); font: 600 var(--text-sm)/1 var(--font-body); color: var(--color-ink); }
+.titleInput:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.docsBtn { flex: none; }
+.docsCount { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--color-ink); color: var(--color-paper-2); font-size: var(--text-2xs); font-weight: 600; }
+.docsCount[data-empty] { background: var(--color-paper-3); color: var(--color-ink-2); }
+.startActions { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
+.inlineLink { padding: 0; border: 0; background: none; font: inherit; color: var(--color-ink); text-decoration: underline; text-underline-offset: 0.18em; cursor: pointer; border-radius: 3px; }
+.inlineLink:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (max-width: 36rem) { .docsLabel { display: none; } }
 .scroll { position: relative; overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: var(--space-xl); }
 .turns { width: 100%; max-width: var(--measure); margin-inline: auto; padding: var(--space-xl) var(--space-lg) var(--space-2xl); display: grid; gap: var(--space-2xl); }
 .turn { display: grid; gap: var(--space-md); }

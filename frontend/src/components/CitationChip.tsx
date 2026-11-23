@@ -32,6 +32,8 @@ interface Props {
   tone?: 'proof' | 'conflict' | 'blocked' | 'plain'
   active?: boolean
   onSelect?: () => void
+  /** Render as a small numbered marker ([1]) inside prose instead of a titled chip. Same popover. */
+  n?: number
 }
 
 export function chipLabel(s: Pick<ChipSource, 'docTitle' | 'clause' | 'page'>) {
@@ -43,7 +45,7 @@ export function chipLabel(s: Pick<ChipSource, 'docTitle' | 'clause' | 'page'>) {
 }
 
 /** A citation that shows its source on hover or focus: the highlighted crop of the page, then the verbatim quote. */
-export function CitationChip({ source, tone = 'proof', active, onSelect }: Props) {
+export function CitationChip({ source, tone = 'proof', active, onSelect, n }: Props) {
   const [open, setOpen] = useState(false)
   const { refs, floatingStyles, context } = useFloating({
     open,
@@ -84,14 +86,21 @@ export function CitationChip({ source, tone = 'proof', active, onSelect }: Props
       <button
         type="button"
         ref={refs.setReference}
-        className={styles.chip}
+        className={n === undefined ? styles.chip : styles.mark}
         data-tone={tone}
         data-active={active || undefined}
-        aria-label={`Source: ${source.docTitle}${source.clause ? `, clause ${source.clause}` : ''}${source.page ? `, page ${source.page}` : ''}`}
+        data-cite={n ?? undefined}
+        aria-label={`Source${n === undefined ? '' : ` ${n}`}: ${source.docTitle}${source.clause ? `, clause ${source.clause}` : ''}${source.page ? `, page ${source.page}` : ''}`}
         {...getReferenceProps({ onClick: onSelect })}
       >
-        <span className={styles.glyph} aria-hidden="true" />
-        <span className={styles.text}>{label}</span>
+        {n === undefined ? (
+          <>
+            <span className={styles.glyph} aria-hidden="true" />
+            <span className={styles.text}>{label}</span>
+          </>
+        ) : (
+          <span aria-hidden="true">{n}</span>
+        )}
       </button>
       <FloatingPortal>
         {isMounted && (

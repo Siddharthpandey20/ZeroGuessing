@@ -28,3 +28,23 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 @media (max-width: 30rem) { .date span { display: none; } }
+
+/* dictation: mic + language toggle; a quiet pulse on the box while listening */
+.mic { display: inline-flex; align-items: center; }
+.lang { height: 24px; min-width: 26px; padding: 0 5px; border: var(--rule-hair) solid var(--color-rule-strong); border-radius: var(--radius-chip); background: transparent; color: var(--color-ink-2); font: 600 var(--text-2xs)/1 var(--font-body); cursor: pointer; }
+.lang:hover:not([disabled]) { color: var(--color-ink); border-color: var(--color-ink-2); }
+.lang:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.lang[disabled] { opacity: 0.5; cursor: default; }
+.box[data-listening] { border-color: var(--color-blocked); }
+.box[data-listening] .micBtn { color: var(--color-blocked); }
+.box[data-listening] .micBtn::after { content: ""; position: absolute; inset: 4px; border-radius: 999px; box-shadow: 0 0 0 0 var(--color-blocked); animation: pulse 1.4s var(--ease-out) infinite; pointer-events: none; }
+.micBtn { position: relative; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-blocked) 45%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+@media (prefers-reduced-motion: reduce) { .box[data-listening] .micBtn::after { animation: none; } }
+@media (max-width: 30rem) {
+  .lang { display: none; }
+  .bar { gap: 0; }
+  .date { padding: 0 2px 0 4px; }
+  .date input { padding: 0 4px; max-width: 118px; }
+  .box { padding-right: var(--space-xs); }
+}

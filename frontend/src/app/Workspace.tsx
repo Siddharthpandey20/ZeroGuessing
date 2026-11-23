@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { LogOut } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
-import type { Conflict, DocumentRow } from '../lib/types'
+import type { Conflict } from '../lib/types'
 import { RouteFallback } from '../components/RouteFallback'
 import styles from './Workspace.module.css'
 
@@ -25,8 +25,6 @@ export default function Workspace() {
 
 function TopBar() {
   const alerts = useQuery({ queryKey: ['alerts'], queryFn: () => api<Conflict[]>('/api/alerts') })
-  const docs = useQuery({ queryKey: ['documents'], queryFn: () => api<DocumentRow[]>('/api/documents') })
-  const active = docs.data?.filter((d) => d.active && d.ingest_status.startsWith('indexed')).length
   const { pathname } = useLocation()
   const askOn = !/^\/app\/(library|alerts)/.test(pathname)
 
@@ -37,10 +35,6 @@ function TopBar() {
         <Link to="/app" className={tabClass(askOn)} aria-current={askOn ? 'page' : undefined}>
           Ask
         </Link>
-        <NavLink to="/app/library" className={({ isActive }) => tabClass(isActive)}>
-          Library
-          {active !== undefined && <span className={`${styles.count} tnum`}>{active}</span>}
-        </NavLink>
         <NavLink to="/app/alerts" className={({ isActive }) => tabClass(isActive)}>
           Alerts
           {!!alerts.data?.length && <span className={`${styles.count} ${styles.countWarn} tnum`}>{alerts.data.length}</span>}

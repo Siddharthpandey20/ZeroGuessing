@@ -1,10 +1,17 @@
+import logging
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# backend/.env, wherever uvicorn/pytest is started from (a CWD-relative ".env" is silently skipped from the repo root)
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+DEV_JWT_SECRET = "dev-only-change-me-to-a-long-random-string"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
@@ -19,7 +26,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
     # auth (JWT access token in Authorization header + rotating refresh token in an httpOnly cookie)
-    jwt_secret: str = "dev-only-change-me-to-a-long-random-string"
+    jwt_secret: str = DEV_JWT_SECRET
     access_ttl_min: int = 30
     refresh_ttl_days: int = 14
     google_client_id: str = ""  # OAuth 2.0 Web client ID from Google Cloud console
@@ -44,6 +51,22 @@ class Settings(BaseSettings):
     amend_autoconfirm: float = 0.8  # amendments below this confidence (or unresolved target) wait for a human
     max_evidence: int = 40  # sentences sent to the drafter
     answer_cache: bool = True
+
+    @field_validator("google_client_id", mode="before")
+    @classmethod
+    def _clean_client_id(cls, v: object) -> object:
+        # a pasted id with a stray space or quotes never matches the token's `aud` claim
+        return v.strip().strip("\"'").strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _jwt_secret_present(self) -> "Settings":
+        # .env.example ships `JWT_SECRET=` blank; an empty HMAC key makes every sign-in a 500 ("HMAC key must not be empty")
+        if not self.jwt_secret.strip():
+            if self.cookie_secure:
+                raise ValueError("JWT_SECRET is empty. Set a long random value in backend/.env before running in production.")
+            logging.getLogger(__name__).warning("JWT_SECRET is empty in backend/.env: using the dev-only secret")
+            self.jwt_secret = DEV_JWT_SECRET
+        return self
 
     @property
     def fallback_models(self) -> list[str]:

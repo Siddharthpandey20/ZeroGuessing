@@ -5,7 +5,7 @@ import logging
 import re
 from itertools import combinations
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.amendments import chain_keys, key
@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 POLARITY = re.compile(r"\b(not|no|shall not|cannot|only|excluded|exclusion|mandatory|optional|eligible|ineligible|"
                       r"covered|not covered|prohibited|permitted|waived)\b", re.IGNORECASE)
+# narrower than POLARITY: a statement that denies, excludes or restricts (used to pair "X is covered" with "X is not covered")
+NEGATED = re.compile(r"\b(not|no|never|cannot|only|excluded|exclusion|ineligible|prohibited)\b", re.IGNORECASE)
 _WORD = re.compile(r"[a-z]{4,}")
 _GENERIC = set("shall which with that this from such will have been under where there their other than upon"
                " bank borrower borrowers loan loans policy document clause paragraph".split())
@@ -84,12 +86,18 @@ def _ev_dict(e: Evidence) -> dict:
 
 
 async def check_evidence(session: AsyncSession, evidence: list[Evidence], values: dict[str, list[Value]],
-                         max_pairs: int = 6) -> list[Contradiction]:
-    """Query-time check over the retrieved evidence; also returns already-known alerts touching it."""
-    links = await chain_keys(session)
+                         max_pairs: int = 6, doc_ids: list[str] | None = None) -> list[Contradiction]:
+    """Query-time check over the retrieved evidence; also returns already-known alerts touching it.
+    With `doc_ids` (a chat's documents), a known alert counts only if both of its sentences are in that scope."""
+    links = await chain_keys(session, doc_ids)
     sids = [e.sentence_id for e in evidence]
     known = list((await session.execute(select(Contradiction).where(
         or_(Contradiction.sentence_a.in_(sids), Contradiction.sentence_b.in_(sids))))).scalars().all())
+    if doc_ids is not None and known:
+        other = {s for c in known for s in (c.sentence_a, c.sentence_b)}
+        doc_of = dict((await session.execute(select(Sentence.id, Sentence.document_id).where(Sentence.id.in_(other)))).all())
+        scope = set(doc_ids)
+        known = [c for c in known if doc_of.get(c.sentence_a) in scope and doc_of.get(c.sentence_b) in scope]
     known_pairs = {frozenset((c.sentence_a, c.sentence_b)) for c in known}
     pairs = []
     current = [e for e in evidence if e.status == "current"]
@@ -118,11 +126,30 @@ async def check_evidence(session: AsyncSession, evidence: list[Evidence], values
     return known
 
 
-async def scan_document(session: AsyncSession, doc_id: str, k: int = 5, batch: int = 10) -> int:
-    """Ingestion-time scan: each chunk of the new document vs its k nearest chunks (any active doc, incl. itself)."""
+async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: int = 10) -> int:
+    """Ingestion-time scan of one document against the library. Candidates come from two sources:
+    (1) each chunk's k nearest chunks by embedding, and (2) a direct pass pairing this document's sentences with any
+    sentence elsewhere whose numbers conflict on overlapping wording, because embeddings of title-prefixed chunks
+    cluster by document and can miss the clause that actually disagrees. Title blocks (_preamble) are skipped."""
+    # alerts whose sentences were replaced by a re-ingest can never be shown again: drop them
+    live = select(Sentence.id)
+    await session.execute(delete(Contradiction).where(or_(Contradiction.sentence_a.not_in(live), Contradiction.sentence_b.not_in(live))))
     links = await chain_keys(session)
+    cand: dict[frozenset, tuple[str, float, dict, dict]] = {}
+
+    def consider(a: dict, b: dict) -> None:
+        if a["sentence_id"] == b["sentence_id"] or a["clause_ref"].startswith("_") or b["clause_ref"].startswith("_"):
+            return
+        if a["doc_id"] == b["doc_id"] and a["clause_ref"] == b["clause_ref"]:
+            return
+        pk = frozenset((a["sentence_id"], b["sentence_id"]))
+        if pk in cand or frozenset((key(a["doc_id"], a["clause_ref"]), key(b["doc_id"], b["clause_ref"]))) in links:
+            return
+        kind = candidate(a["text"], a["values"], a["heading"], b["text"], b["values"], b["heading"])
+        if kind:
+            cand[pk] = (kind, _overlap(f"{a['heading']} {a['text']}", f"{b['heading']} {b['text']}"), a, b)
+
     chunks = (await session.execute(select(Chunk).where(Chunk.document_id == doc_id, Chunk.embedding.is_not(None)))).scalars().all()
-    cand: dict[frozenset, tuple[dict, dict]] = {}
     for ch in chunks:
         near = (await session.execute(
             select(Chunk).join(Document, Document.id == Chunk.document_id)
@@ -133,15 +160,50 @@ async def scan_document(session: AsyncSession, doc_id: str, k: int = 5, batch: i
         for other in near:
             if other.clause_id == ch.clause_id:
                 continue
-            theirs = await _sentences(session, other.sentence_ids)
             for a in mine:
-                for b in theirs:
-                    pk = frozenset((a["sentence_id"], b["sentence_id"]))
-                    if pk in cand or frozenset((key(a["doc_id"], a["clause_ref"]), key(b["doc_id"], b["clause_ref"]))) in links:
-                        continue
-                    if candidate(a["text"], a["values"], a["heading"], b["text"], b["values"], b["heading"]):
-                        cand[pk] = (a, b)
-    pairs = list(cand.values())[:60]
+                for b in await _sentences(session, other.sentence_ids):
+                    consider(a, b)
+
+    # direct pass over sentences that carry values (a few hundred at corpus scale)
+    rows = (await session.execute(
+        select(Sentence, Clause, Document).join(Clause, Clause.id == Sentence.clause_id)
+        .join(Document, Document.id == Sentence.document_id).where(Document.active.is_(True))
+    )).all()
+    every = [{"sentence_id": s.id, "doc_id": d.id, "doc_title": d.title, "clause_ref": c.clause_ref, "heading": c.heading_path,
+              "text": s.text, "values": _vals(s.values)} for s, c, d in rows]
+    valued = [v for v in every if v["values"]]
+    for a in (v for v in valued if v["doc_id"] == doc_id):
+        for b in valued:
+            consider(a, b)
+
+    # rule / eligibility conflicts carry no numbers and share few words ("co-borrowers ... are covered" vs
+    # "co-borrowers are not covered"): pair sentences across documents that share a distinctive term (in <= 4
+    # sentences library-wide) where exactly one side is negated or restricted. The LLM still confirms each pair.
+    df: dict[str, int] = {}
+    toks = {v["sentence_id"]: _content(v["text"]) for v in every}
+    for t in toks.values():
+        for w in t:
+            df[w] = df.get(w, 0) + 1
+    rule_pairs = 0
+    for a in (v for v in every if v["doc_id"] == doc_id and not v["clause_ref"].startswith("_")):
+        rare = {w for w in toks[a["sentence_id"]] if df.get(w, 0) <= 4 and len(w) > 3}
+        if not rare:
+            continue
+        for b in every:
+            if b["doc_id"] == doc_id or rule_pairs >= 15:
+                continue
+            if not (rare & toks[b["sentence_id"]]) or bool(NEGATED.search(a["text"])) == bool(NEGATED.search(b["text"])):
+                continue
+            pk = frozenset((a["sentence_id"], b["sentence_id"]))
+            if pk in cand or b["clause_ref"].startswith("_"):
+                continue
+            if frozenset((key(a["doc_id"], a["clause_ref"]), key(b["doc_id"], b["clause_ref"]))) in links:
+                continue
+            cand[pk] = ("rule", _overlap(f"{a['heading']} {a['text']}", f"{b['heading']} {b['text']}"), a, b)
+            rule_pairs += 1
+
+    ranked = sorted(cand.values(), key=lambda t: (t[0] != "number", -t[1]))
+    pairs = [(a, b) for _, _, a, b in ranked[:60]]
     found = 0
     for i in range(0, len(pairs), batch):
         part = pairs[i:i + batch]
