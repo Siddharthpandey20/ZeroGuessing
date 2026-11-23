@@ -40,9 +40,13 @@ export const dismissPending = (chatId: string) => set(chatId, null)
 let lastFresh: string | null = null
 export const takeFresh = () => lastFresh
 
+// answers to read aloud as soon as they arrive: only questions asked with the voice-conversation button
+const speakIds = new Set<string>()
+export const consumeSpeak = (id: string) => speakIds.delete(id)
+
 export async function runAnswer(
   qc: QueryClient,
-  opts: { chatId: string; path: string; method?: 'POST' | 'PUT'; body?: unknown; turn: number | null; question: string; asOf: string },
+  opts: { chatId: string; path: string; method?: 'POST' | 'PUT'; body?: unknown; turn: number | null; question: string; asOf: string; speakReply?: boolean },
   onDone?: (m: Message) => void,
 ) {
   const { chatId } = opts
@@ -57,6 +61,7 @@ export async function runAnswer(
       } else if (ev.event === 'answer') {
         const msg = d.message as Message
         lastFresh = msg?.id ?? null
+        if (opts.speakReply && msg?.id) speakIds.add(msg.id)
         await Promise.all([
           qc.invalidateQueries({ queryKey: ['chat', chatId] }),
           qc.invalidateQueries({ queryKey: ['chats'] }),

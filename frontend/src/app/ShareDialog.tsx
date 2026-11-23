@@ -13,13 +13,30 @@ export function ShareDialog({ chatId, turn, onClose }: { chatId: string; turn?: 
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // No close() in a cleanup: under StrictMode the effect runs mount, cleanup, mount, and that close() fired the
+  // dialog's close event, whose onClose unmounted the dialog the moment it opened (Share looked dead).
+  // An unmounted <dialog> leaves the top layer by itself.
   useEffect(() => {
     const d = ref.current
-    d?.showModal()
-    return () => d?.close()
+    if (d && !d.open) d.showModal()
   }, [])
 
-  const link = token ? `${window.location.origin}/s/${token}` : ''
+  // VITE_PUBLIC_ORIGIN: the address other people can reach (deployed domain or a tunnel); else wherever this app runs
+  const origin = (import.meta.env.VITE_PUBLIC_ORIGIN as string | undefined)?.replace(/\/+$/, '') || window.location.origin
+  const link = token ? `${origin}/s/${token}` : ''
+  const localOnly = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+    } catch {
+      // the clipboard API needs https or localhost; fall back to selecting the text for Ctrl+C
+      const input = document.querySelector<HTMLInputElement>('input[aria-label="Share link"]')
+      input?.select()
+      document.execCommand?.('copy')
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
   const create = async () => {
     setBusy(true)
     setError(null)
@@ -67,14 +84,14 @@ export function ShareDialog({ chatId, turn, onClose }: { chatId: string; turn?: 
           <>
             <div className={styles.linkRow}>
               <input className="input" readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Share link" />
-              <button type="button" className="btn btn-ink" onClick={async () => {
-                await navigator.clipboard.writeText(link)
-                setCopied(true)
-                window.setTimeout(() => setCopied(false), 1800)
-              }}>
+              <button type="button" className="btn btn-ink" onClick={copy}>
                 {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />} {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
+            <p className={styles.warn}>
+              Anyone with this link can open it without signing in, until it expires.
+              {localOnly && ' This address only works on this computer: set VITE_PUBLIC_ORIGIN to your deployed or tunnelled address to share it with others.'}
+            </p>
             <div className={styles.actions}>
               <a className="btn btn-ghost" href={`/public/shares/${token}/html`} target="_blank" rel="noreferrer">
                 <Download size={15} aria-hidden="true" /> Offline HTML copy

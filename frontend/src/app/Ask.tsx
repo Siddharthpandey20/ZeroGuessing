@@ -9,10 +9,10 @@ import { AnswerView } from './answer/AnswerView'
 import { StageReadout } from './answer/StageReadout'
 import { fmtDate, type Selection } from './answer/selection'
 import { ChatDocs, isReady } from './ChatDocs'
-import { Composer, type InputMode } from './Composer'
+import { Composer, type AskOptions, type InputMode } from './Composer'
 import { Evidence } from './Evidence'
 import { ShareDialog } from './ShareDialog'
-import { dismissPending, runAnswer, takeFresh, usePending, type Pending } from './askStore'
+import { consumeSpeak, dismissPending, runAnswer, takeFresh, usePending, type Pending } from './askStore'
 import styles from './Ask.module.css'
 
 const SUGGESTIONS = [
@@ -64,9 +64,9 @@ export default function Ask() {
   }, [chatId, nav, qc])
 
   const ask = useCallback(
-    async (question: string, asOf: string, mode: InputMode) => {
+    async (question: string, asOf: string, mode: InputMode, opts?: AskOptions) => {
       const id = await ensureChat()
-      void runAnswer(qc, { chatId: id, path: `/api/chats/${id}/messages`, body: { question, as_of: asOf, input_mode: mode }, turn: null, question, asOf })
+      void runAnswer(qc, { chatId: id, path: `/api/chats/${id}/messages`, body: { question, as_of: asOf, input_mode: mode }, turn: null, question, asOf, speakReply: opts?.speakReply })
     },
     [ensureChat, qc],
   )
@@ -267,7 +267,7 @@ function ChatRail({ chats, loading, activeId, onPick, onDelete }: {
 }
 
 function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading, uploading }: {
-  onAsk: (q: string, a: string, m: InputMode) => void; onAttach: (files: File[]) => void; onDemo: () => void; onOpenDocs: () => void
+  onAsk: (q: string, a: string, m: InputMode, o?: AskOptions) => void; onAttach: (files: File[]) => void; onDemo: () => void; onOpenDocs: () => void
   total: number; ready: number; loading: boolean; uploading: boolean
 }) {
   const [seed, setSeed] = useState<string | null>(null)
@@ -322,7 +322,7 @@ function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading,
 
 function Thread({ chatId, detail, loading, error, pending, selection, onSelect, onShare, onAsk, onAttach, busy }: {
   chatId: string; detail?: ChatDetail; loading: boolean; error: boolean; pending: Pending | null; selection: Selection
-  onSelect: (s: Selection) => void; onShare: (turn: number) => void; onAsk: (q: string, a: string, m: InputMode) => void
+  onSelect: (s: Selection) => void; onShare: (turn: number) => void; onAsk: (q: string, a: string, m: InputMode, o?: AskOptions) => void
   onAttach: (files: File[]) => void; busy: boolean
 }) {
   const qc = useQueryClient()
@@ -361,11 +361,11 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
     speak(s.text, s.lang, () => setSpeaking((x) => (x === m.id ? null : x)))
   }
 
-  // a question asked by voice gets its answer read back once it arrives
+  // a question asked with the voice-conversation button gets its answer read back once it arrives
   useEffect(() => {
     if (!fresh || spokeFor.current === fresh || !canSpeak()) return
     const m = turns.flatMap((t) => t.versions).find((v) => v.id === fresh)
-    if (m?.input_mode === 'voice' && m.answer && !m.answer.error) {
+    if (m && m.answer && !m.answer.error && consumeSpeak(m.id)) {
       spokeFor.current = fresh
       listen(m)
     }

@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Camera, LoaderCircle, Mic, Paperclip, Square } from 'lucide-react'
+import { ArrowUp, AudioLines, Camera, ImageUp, LoaderCircle, Mic, Paperclip, Square } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import { canDictate, dictate, type SpeechLang } from '../lib/speech'
+import { canDictate, canSpeak, dictate, stopSpeaking, type SpeechLang } from '../lib/speech'
+import { CameraCapture } from './CameraCapture'
 import styles from './Composer.module.css'
 
 export type InputMode = 'typed' | 'camera' | 'voice'
+/** speakReply: read the answer aloud when it arrives (voice conversation only). */
+export interface AskOptions {
+  speakReply?: boolean
+}
 
 const todayISO = () => {
   const d = new Date()
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
 }
 
+const canUseCamera = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+
 interface Props {
-  onSubmit: (question: string, asOf: string, mode: InputMode) => void
+  onSubmit: (question: string, asOf: string, mode: InputMode, opts?: AskOptions) => void
   busy?: boolean
   initial?: { question: string; asOf: string }
   onCancel?: () => void
@@ -23,20 +30,28 @@ interface Props {
   onAttach?: (files: File[]) => void
 }
 
-/** Question box: the date the rule should be checked on, PDFs for this chat, dictation, and a camera for printed text. */
+/**
+ * Question box: the date the rule should be checked on, PDFs for this chat, text from an image or a live photo,
+ * dictation into the box (you review and press Ask), and a voice conversation (speak, it asks when you pause and
+ * reads the answer aloud).
+ */
 export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact, submitLabel = 'Ask', onAttach }: Props) {
   const [q, setQ] = useState(initial?.question ?? '')
   const [asOf, setAsOf] = useState(initial?.asOf ?? todayISO())
   const [mode, setMode] = useState<InputMode>('typed')
   const [reading, setReading] = useState(false)
   const [note, setNote] = useState<string | null>(null)
-  const [listening, setListening] = useState(false)
+  const [listening, setListening] = useState<'dictate' | 'converse' | null>(null)
   const [lang, setLang] = useState<SpeechLang>('en-IN')
+  const [camera, setCamera] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
-  const photo = useRef<HTMLInputElement>(null)
+  const imagePick = useRef<HTMLInputElement>(null)
+  const photoCapture = useRef<HTMLInputElement>(null)
   const pdfs = useRef<HTMLInputElement>(null)
   const stopRef = useRef<(() => void) | null>(null)
+  const heard = useRef('')
   const mic = canDictate()
+  const hi = lang === 'hi-IN'
 
   useEffect(() => {
     const el = ta.current
@@ -61,23 +76,43 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
     }
   }
 
-  const toggleMic = () => {
+  /** Mic: dictation into the box. Voice conversation: the same, then it asks by itself and reads the answer. */
+  const listen = (kind: 'dictate' | 'converse') => {
     if (listening) {
-      stopRef.current?.()
+      stopRef.current?.() // a second press ends the take early
       return
     }
-    const before = q.trim()
-    setNote(lang === 'hi-IN' ? 'सुन रहा हूँ… बोलिए' : 'Listening… speak your question')
-    setListening(true)
+    stopSpeaking() // never transcribe our own voice
+    const before = kind === 'dictate' ? q.trim() : ''
+    heard.current = before
+    setNote(
+      kind === 'dictate'
+        ? (hi ? 'सुन रहा हूँ… बोलिए' : 'Listening… speak your question. Pausing is fine.')
+        : (hi ? 'सुन रहा हूँ… रुकते ही प्रश्न भेजा जाएगा और उत्तर पढ़ा जाएगा' : 'Listening… ask your question. When you stop, it is sent and the answer is read aloud.'),
+    )
+    setListening(kind)
     stopRef.current = dictate(
       lang,
       (t) => {
-        setQ(before ? `${before} ${t}` : t)
+        heard.current = before ? `${before} ${t}` : t
+        setQ(heard.current)
         setMode('voice')
       },
       (error) => {
-        setListening(false)
+        setListening(null)
         stopRef.current = null
+        const text = heard.current.trim()
+        if (kind === 'converse') {
+          if (text.length >= 2 && !busy) {
+            onSubmit(text, asOf, 'voice', { speakReply: canSpeak() })
+            setQ('')
+            setMode('typed')
+            setNote(null)
+            return
+          }
+          setNote(error ?? 'I didn’t catch a question. Press the voice button and try again.')
+          return
+        }
         setNote(error ?? 'Check the words, then press Ask.')
         ta.current?.focus()
       },
@@ -85,6 +120,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
   }
 
   const readPhoto = async (f: File) => {
+    setCamera(false)
     setReading(true)
     setNote(null)
     try {
@@ -93,14 +129,20 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
       const r = await api<{ text: string; note: string }>('/api/camera/transcribe', { method: 'POST', body: fd })
       setQ(r.text.trim())
       setMode('camera')
-      setNote('Read from the photo. Check the text before you ask.')
+      setNote('Read from the image. Check the text before you ask.')
       ta.current?.focus()
     } catch (e) {
-      setNote(e instanceof ApiError ? e.message : 'The photo could not be read.')
+      setNote(e instanceof ApiError ? e.message : 'The image could not be read.')
     } finally {
       setReading(false)
-      if (photo.current) photo.current.value = ''
+      if (imagePick.current) imagePick.current.value = ''
+      if (photoCapture.current) photoCapture.current.value = ''
     }
+  }
+
+  const pickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f) void readPhoto(f)
   }
 
   return (
@@ -154,20 +196,34 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
           </>
         )}
 
-        <input ref={photo} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" hidden onChange={(e) => e.target.files?.[0] && readPhoto(e.target.files[0])} />
-        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => photo.current?.click()} disabled={reading} aria-label="Read a question or clause from a photo" title="Read text from a photo">
-          {reading ? <LoaderCircle size={16} className={styles.spin} /> : <Camera size={16} strokeWidth={1.8} />}
+        {/* text from an image: pick a saved one, or take a live photo */}
+        <input ref={imagePick} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pickImage} />
+        <input ref={photoCapture} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" hidden onChange={pickImage} />
+        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => imagePick.current?.click()} disabled={reading}
+          aria-label="Upload an image of a question or clause" title="Upload an image">
+          {reading ? <LoaderCircle size={16} className={styles.spin} /> : <ImageUp size={16} strokeWidth={1.8} />}
+        </button>
+        <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={reading}
+          onClick={() => (canUseCamera() ? setCamera(true) : photoCapture.current?.click())}
+          aria-label="Take a photo of a question or clause" title="Take a photo">
+          <Camera size={16} strokeWidth={1.8} />
         </button>
 
         {mic && (
           <span className={styles.mic}>
-            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn}`} onClick={toggleMic}
-              aria-pressed={listening} aria-label={listening ? 'Stop dictation' : 'Dictate your question'} title={listening ? 'Stop' : 'Dictate'}>
-              {listening ? <Square size={13} strokeWidth={2.4} /> : <Mic size={16} strokeWidth={1.8} />}
+            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn}`} onClick={() => listen('dictate')}
+              data-on={listening === 'dictate' || undefined} disabled={listening === 'converse'}
+              aria-pressed={listening === 'dictate'} aria-label={listening === 'dictate' ? 'Stop dictation' : 'Dictate your question into the box'} title={listening === 'dictate' ? 'Stop' : 'Dictate'}>
+              {listening === 'dictate' ? <Square size={13} strokeWidth={2.4} /> : <Mic size={16} strokeWidth={1.8} />}
             </button>
-            <button type="button" className={styles.lang} onClick={() => setLang((l) => (l === 'en-IN' ? 'hi-IN' : 'en-IN'))} disabled={listening}
-              aria-label={`Dictation language: ${lang === 'en-IN' ? 'English' : 'Hindi'}. Switch`} title="Dictation language">
-              {lang === 'en-IN' ? 'EN' : 'हि'}
+            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn} ${styles.converse}`} onClick={() => listen('converse')}
+              data-on={listening === 'converse' || undefined} disabled={busy || listening === 'dictate'}
+              aria-pressed={listening === 'converse'} aria-label={listening === 'converse' ? 'Stop listening' : 'Voice conversation: speak, and hear the answer'} title={listening === 'converse' ? 'Stop' : 'Speak and hear the answer'}>
+              {listening === 'converse' ? <Square size={13} strokeWidth={2.4} /> : <AudioLines size={16} strokeWidth={1.8} />}
+            </button>
+            <button type="button" className={styles.lang} onClick={() => setLang((l) => (l === 'en-IN' ? 'hi-IN' : 'en-IN'))} disabled={!!listening}
+              aria-label={`Speech language: ${hi ? 'Hindi' : 'English'}. Switch`} title="Speech language">
+              {hi ? 'हि' : 'EN'}
             </button>
           </span>
         )}
@@ -180,6 +236,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
           {submitLabel} <ArrowUp size={15} strokeWidth={2.2} aria-hidden="true" />
         </button>
       </div>
+      {camera && <CameraCapture onCapture={readPhoto} onClose={() => setCamera(false)} />}
     </form>
   )
 }

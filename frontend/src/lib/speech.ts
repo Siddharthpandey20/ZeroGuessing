@@ -34,8 +34,18 @@ const ERRORS: Record<string, string> = {
   network: 'Dictation needs an internet connection in this browser.',
 }
 
-/** Start dictation. `onText` gets the running transcript; returns a stop function. */
-export function dictate(lang: SpeechLang, onText: (text: string) => void, onEnd: (error?: string) => void): () => void {
+/**
+ * Start dictation. `onText` gets the running transcript; returns a stop function.
+ * The browser's own end-of-speech cut-off is about a second, so a stutter or a breath ended the take. Here the
+ * recogniser runs continuously and we stop it ourselves: after `pauseMs` without new words once something was said,
+ * or after `idleMs` if nothing is said at all.
+ */
+export function dictate(
+  lang: SpeechLang,
+  onText: (text: string) => void,
+  onEnd: (error?: string) => void,
+  { pauseMs = 2500, idleMs = 8000 }: { pauseMs?: number; idleMs?: number } = {},
+): () => void {
   const R = ctor()
   if (!R) {
     onEnd('Dictation is not available in this browser. Try Chrome or Edge.')
@@ -44,25 +54,42 @@ export function dictate(lang: SpeechLang, onText: (text: string) => void, onEnd:
   const r = new R()
   r.lang = lang
   r.interimResults = true
-  r.continuous = false
+  r.continuous = true
   let failed: string | undefined
+  let heard = false
+  let ended = false
+  let timer = window.setTimeout(() => r.stop(), idleMs)
   r.onresult = (e) => {
-    let t = ''
-    for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript
-    onText(t.trim())
+    // continuous mode returns one segment per phrase; join them with spaces ("the" + "penal" must not become "thepenal")
+    const parts: string[] = []
+    for (let i = 0; i < e.results.length; i++) parts.push(e.results[i][0].transcript.trim())
+    const t = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ')
+    if (t) heard = true
+    onText(t)
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => r.stop(), heard ? pauseMs : idleMs)
   }
   r.onerror = (e) => {
-    if (e.error !== 'aborted') failed = ERRORS[e.error] ?? 'Dictation stopped unexpectedly.'
+    if (e.error !== 'aborted' && !(e.error === 'no-speech' && heard)) failed = ERRORS[e.error] ?? 'Dictation stopped unexpectedly.'
   }
-  r.onend = () => onEnd(failed)
+  r.onend = () => {
+    if (ended) return
+    ended = true
+    window.clearTimeout(timer)
+    onEnd(failed)
+  }
   r.start()
-  return () => r.stop()
+  return () => {
+    window.clearTimeout(timer)
+    r.stop()
+  }
 }
 
 /** What "Listen" reads: the verified answer only (blocked claims are never spoken), or the abstention. */
 export function spokenAnswer(a: Answer): { text: string; lang: SpeechLang } {
   const hindi = a.lang === 'hi'
   const lang: SpeechLang = hindi ? 'hi-IN' : 'en-IN'
+  if (a.status === 'chat') return { text: a.reply ?? '', lang }
   if (a.status === 'abstained') {
     const missing = a.abstention?.missing?.length ? ` ${a.abstention.missing.join('. ')}.` : ''
     return { text: `I don't have proof for this.${missing}`, lang: 'en-IN' }
