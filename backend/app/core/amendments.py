@@ -122,6 +122,26 @@ async def extract_for_document(session: AsyncSession, doc: Document) -> list[Ame
     return created
 
 
+async def resolve_targets(session: AsyncSession) -> int:
+    """Amendments whose target document wasn't in the library when they were extracted (a circular uploaded before
+    the policy it amends, or in the same batch but read first) get their target now, so the answer doesn't depend on
+    upload order. Auto-confirmed under the same rule as at extraction."""
+    s = get_settings()
+    n = 0
+    for a in (await session.execute(select(Amendment).where(Amendment.target_doc_id.is_(None),
+                                                            Amendment.status != "rejected"))).scalars().all():
+        target = await _match_doc(session, a.target_doc_ref, a.source_doc_id)
+        if target is None:
+            continue
+        a.target_doc_id = target.id
+        if a.status == "proposed" and a.confidence >= s.amend_autoconfirm:
+            a.status = "confirmed"
+        n += 1
+    if n:
+        await relink(session)
+    return n
+
+
 async def relink(session: AsyncSession) -> None:
     """Recompute target_key/root_key/via for all amendments (order-independent: works whatever upload order)."""
     ams = (await session.execute(select(Amendment))).scalars().all()

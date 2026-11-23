@@ -5,8 +5,10 @@ from pathlib import Path
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# backend/.env, wherever uvicorn/pytest is started from (a CWD-relative ".env" is silently skipped from the repo root)
-ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+# backend/.env (or the repo-root .env), wherever uvicorn/pytest is started from; a CWD-relative ".env" would be
+# silently skipped from the other folder. When both exist, backend/.env wins.
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = (BACKEND_DIR.parent / ".env", BACKEND_DIR / ".env")
 DEV_JWT_SECRET = "dev-only-change-me-to-a-long-random-string"
 
 
@@ -57,6 +59,14 @@ class Settings(BaseSettings):
     def _clean_client_id(cls, v: object) -> object:
         # a pasted id with a stray space or quotes never matches the token's `aud` claim
         return v.strip().strip("\"'").strip() if isinstance(v, str) else v
+
+    @field_validator("storage_dir", mode="after")
+    @classmethod
+    def _anchor_storage_dir(cls, v: str) -> str:
+        # "./data/files" relative to backend/, not to wherever the server was started: otherwise a restart from
+        # another folder can't find the PDFs uploaded before it (pages, crops and re-ingest fail)
+        p = Path(v)
+        return str(p if p.is_absolute() else (BACKEND_DIR / p).resolve())
 
     @model_validator(mode="after")
     def _jwt_secret_present(self) -> "Settings":

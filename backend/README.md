@@ -54,6 +54,13 @@ uv run python -m scripts.run_eval --key change-me --ingest   # upload corpus + s
 ```
 Tests (fake LLM, needs the compose DB): `docker compose exec db psql -U zeroguess -c "CREATE DATABASE zeroguess_test"` once, then `uv run pytest -q`.
 
+### After restarting the PC
+From the repo root: `powershell -ExecutionPolicy Bypass -File .\start.ps1`. It starts Docker Desktop and waits for it, starts the database, then opens the API and the web app in two windows (`-NoBackend -NoFrontend` for only the database).
+- Users, chats and documents live in the Docker volume `backend_pgdata` and uploaded PDFs in `backend/data/files`, so they survive restarts. **Never** run `docker compose down -v` or delete that volume: that is what erases them.
+- The database container restarts by itself whenever Docker Desktop starts. If the app says it can't reach the database, Docker Desktop isn't running yet, or another container holds port 5433 (`docker ps`, then `docker stop <name>`).
+- A PDF that was still being read when the PC went down is finished automatically when the API starts.
+- Tests use the separate `zeroguess_test` database and refuse to run against any other, so they can't wipe your data.
+
 ## Auth
 | Who | How | Role |
 |---|---|---|

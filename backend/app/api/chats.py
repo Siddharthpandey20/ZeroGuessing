@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -202,6 +202,12 @@ async def _respond(msg_id: str, stream: bool, use_cache: bool = True):
     return last["message"]
 
 
+async def _drop_after(session: AsyncSession, chat_id: str, turn: int) -> None:
+    """Editing or re-running a past question starts the conversation over from there (as in ChatGPT): every later
+    question and answer, all versions, is removed. Earlier versions of this turn stay, for the version switcher."""
+    await session.execute(delete(Message).where(Message.chat_id == chat_id, Message.turn > turn))
+
+
 async def _new_message(session: AsyncSession, chat: Chat, turn: int, version: int, body: AskIn) -> Message:
     m = Message(chat_id=chat.id, turn=turn, version=version, question=body.question.strip(),
                 as_of=body.as_of or date.today(), input_mode=body.input_mode)
@@ -307,11 +313,13 @@ async def ask(chat_id: str, body: AskIn, stream: bool = Query(True), p: Principa
 @router.put("/chats/{chat_id}/turns/{turn}")
 async def edit_and_resend(chat_id: str, turn: int, body: AskIn, stream: bool = Query(True),
                           session: AsyncSession = Depends(get_session), p: Principal = Depends(get_principal)):
-    """Edit a past question (and/or its as-of date): creates a new version of that turn; old versions are kept."""
+    """Edit a past question (and/or its as-of date): creates a new version of that turn (old versions are kept) and
+    removes every turn after it, so the conversation continues from the edited question."""
     chat = await _chat(session, chat_id, p)
     v = (await session.execute(select(func.max(Message.version)).where(Message.chat_id == chat_id, Message.turn == turn))).scalar()
     if v is None:
         raise HTTPException(404, "turn not found")
+    await _drop_after(session, chat_id, turn)
     m = await _new_message(session, chat, turn, v + 1, body)
     return await _respond(m.id, stream)
 
@@ -324,6 +332,7 @@ async def regenerate(chat_id: str, turn: int, stream: bool = Query(True), p: Pri
                                   .order_by(Message.version.desc()).limit(1))).scalar_one_or_none()
     if prev is None:
         raise HTTPException(404, "turn not found")
+    await _drop_after(session, chat_id, turn)
     m = await _new_message(session, chat, turn, prev.version + 1,
                            AskIn(question=prev.question, as_of=prev.as_of, input_mode=prev.input_mode))
     return await _respond(m.id, stream, use_cache=False)  # regenerate = re-run, bypass the answer cache

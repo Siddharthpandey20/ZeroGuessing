@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.render import render_crop, render_page
 from app.db import get_session
-from app.ingest.pipeline import DuplicateDocument, create_document, run_ingest
+from app.ingest.pipeline import DuplicateDocument, create_document, needs_ingest, requeue, run_ingest
 from app.models import Amendment, Chat, ChatDocument, Clause, Contradiction, Document, Job, Sentence
 from app.security import Principal, get_principal, require_admin
 from app.storage import get_storage
@@ -82,7 +82,12 @@ async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[
         try:
             doc, job = await create_document(session, data, name, source=source)
         except DuplicateDocument as d:
-            out.append(UploadResult(filename=name, document_id=d.doc.id, job_id=None, status="duplicate"))
+            job_id = None
+            if needs_ingest(d.doc):  # stored before but its reading failed or was cut off by a restart: read it again
+                job = await requeue(session, d.doc)
+                bg.add_task(run_ingest, d.doc.id, job.id)
+                job_id = job.id
+            out.append(UploadResult(filename=name, document_id=d.doc.id, job_id=job_id, status="duplicate"))
             continue
         bg.add_task(run_ingest, doc.id, job.id)
         out.append(UploadResult(filename=name, document_id=doc.id, job_id=job.id, status="queued"))
@@ -161,10 +166,7 @@ async def patch_document(doc_id: str, patch: DocumentPatch, session: AsyncSessio
 @router.post("/documents/{doc_id}/reingest", status_code=202, dependencies=[Depends(require_admin)])
 async def reingest(doc_id: str, bg: BackgroundTasks, session: AsyncSession = Depends(get_session)):
     doc = await _get_doc(session, doc_id)
-    job = Job(kind="ingest", document_id=doc.id)
-    doc.ingest_status = "queued"
-    session.add(job)
-    await session.commit()
+    job = await requeue(session, doc)
     bg.add_task(run_ingest, doc.id, job.id)
     return {"job_id": job.id}
 

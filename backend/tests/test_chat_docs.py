@@ -117,3 +117,54 @@ async def test_chat_scoped_documents(client):
 ])
 def test_short_title(q, expected):
     assert short_title(q) == expected
+
+
+async def test_upload_order_and_failed_reupload(client):
+    """Several PDFs in one chat, uploaded in any order (an amending circular before the policy it amends), all
+    resolve; a PDF whose reading failed or was cut off is read again when uploaded again, not left stuck."""
+    c = client
+    await sign_in(c, "order@bank.example")
+    chat = (await c.post("/api/chats", json={})).json()["id"]
+    r = await c.post(f"/api/chats/{chat}/documents", files=[pdf("c.pdf", CIRC_C), pdf("b.pdf", CIRC_B)])
+    assert [x["status"] for x in r.json()] == ["queued", "queued"]
+    r = await c.post(f"/api/chats/{chat}/documents", files=[pdf("master.pdf", MASTER), pdf("kfs.pdf", KFS)])
+    assert [x["status"] for x in r.json()] == ["queued", "queued"]
+    docs = (await c.get(f"/api/chats/{chat}/documents")).json()
+    assert len(docs) == 4 and all(d["ingest_status"] == "indexed" for d in docs), docs
+    master = next(d["id"] for d in docs if d["title"].startswith("Master"))
+    ams = (await c.get("/api/amendments", headers=KEY)).json()
+    assert len(ams) == 2 and all(a["status"] == "confirmed" and a["root_key"] == f"{master}:7.2" for a in ams), ams
+    a = await ask(c, chat)
+    assert "Nil" in a["claims"][0]["text"], a["claims"]  # C -> B -> A chain, though C was read first
+
+    # simulate a restart mid-ingest: the KFS was left half-read; uploading it again reads it again
+    from app.db import SessionLocal
+    from app.models import Document
+    kfs = next(d["id"] for d in docs if d["filename"] == "kfs.pdf")
+    async with SessionLocal() as s:
+        (await s.get(Document, kfs)).ingest_status = "parsing"
+        await s.commit()
+    r = (await c.post(f"/api/chats/{chat}/documents", files=[pdf("kfs.pdf", KFS)])).json()
+    assert r[0]["status"] == "duplicate" and r[0]["job_id"], r
+    assert next(d for d in (await c.get(f"/api/chats/{chat}/documents")).json() if d["id"] == kfs)["ingest_status"] == "indexed"
+    # an already-indexed duplicate is only linked, not read again
+    assert (await c.post(f"/api/chats/{chat}/documents", files=[pdf("kfs.pdf", KFS)])).json()[0]["job_id"] is None
+
+
+async def test_edit_removes_later_turns(client):
+    """Editing (or re-running) question 2 of 4 removes questions 3 and 4, like ChatGPT; turn 2 keeps its versions."""
+    c = client
+    await sign_in(c, "edit@bank.example")
+    chat = (await c.post("/api/chats", json={})).json()["id"]
+    await c.post(f"/api/chats/{chat}/documents", files=[pdf("master.pdf", MASTER)])
+    for _ in range(4):
+        await ask(c, chat)
+    r = await c.put(f"/api/chats/{chat}/turns/2?stream=false", json={"question": "What are the penal charges on an overdue instalment?"})
+    assert r.status_code == 200, r.text
+    turns = (await c.get(f"/api/chats/{chat}")).json()["turns"]
+    assert [t["turn"] for t in turns] == [1, 2] and len(turns[1]["versions"]) == 2, turns
+    assert turns[1]["versions"][-1]["question"].startswith("What are the penal")
+    await ask(c, chat)  # the conversation continues as turn 3
+    assert (await c.post(f"/api/chats/{chat}/turns/1/regenerate?stream=false")).status_code == 200
+    turns = (await c.get(f"/api/chats/{chat}")).json()["turns"]
+    assert [t["turn"] for t in turns] == [1] and len(turns[0]["versions"]) == 2, turns

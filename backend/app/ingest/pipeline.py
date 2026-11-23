@@ -37,6 +37,7 @@ async def create_document(session: AsyncSession, data: bytes, filename: str, sou
     job = Job(kind="ingest", document_id=doc.id)
     session.add(job)
     await session.commit()
+    RUNNING.add(doc.id)
     return doc, job
 
 
@@ -57,7 +58,45 @@ def _chunks(clause: PClause, sent_ids: list[str]) -> list[tuple[list[str], str]]
     return out
 
 
+# documents this process has queued or is ingesting right now. Anything else that isn't indexed was cut off (server
+# stopped or machine restarted mid-ingest) or failed, and is safe to queue again
+RUNNING: set[str] = set()
+DONE_STATES = ("indexed", "indexed_no_vectors")
+
+
+def needs_ingest(doc: Document) -> bool:
+    return doc.ingest_status not in DONE_STATES and doc.id not in RUNNING
+
+
+async def requeue(session: AsyncSession, doc: Document) -> Job:
+    job = Job(kind="ingest", document_id=doc.id)
+    doc.ingest_status, doc.ingest_error = "queued", None
+    session.add(job)
+    await session.commit()
+    RUNNING.add(doc.id)
+    return job
+
+
+async def resume_interrupted() -> None:
+    """On startup: finish documents whose ingestion was interrupted by a shutdown or restart, one at a time."""
+    async with SessionLocal() as session:
+        docs = (await session.execute(select(Document).where(Document.ingest_status.in_(("queued", "parsing", "embedding")))
+                                      .order_by(Document.uploaded_at))).scalars().all()
+        jobs = [(d.id, (await requeue(session, d)).id) for d in docs]
+    for doc_id, job_id in jobs:
+        log.info("resuming interrupted ingest doc=%s", doc_id)
+        await run_ingest(doc_id, job_id)
+
+
 async def run_ingest(doc_id: str, job_id: str | None = None) -> None:
+    RUNNING.add(doc_id)
+    try:
+        await _run_ingest(doc_id, job_id)
+    finally:
+        RUNNING.discard(doc_id)
+
+
+async def _run_ingest(doc_id: str, job_id: str | None = None) -> None:
     async with SessionLocal() as session:
         doc = await session.get(Document, doc_id)
         job = await session.get(Job, job_id) if job_id else None
@@ -121,11 +160,14 @@ async def run_ingest(doc_id: str, job_id: str | None = None) -> None:
             # amendment pass + contradiction scan: failures here never fail ingestion (doc stays searchable)
             notes = []
             try:
-                from app.core.amendments import extract_for_document
+                from app.core.amendments import extract_for_document, resolve_targets
 
                 found = await extract_for_document(session, doc)
                 await session.commit()
                 notes.append(f"amendments={len(found)}")
+                if linked := await resolve_targets(session):  # earlier circulars that amend this document
+                    await session.commit()
+                    notes.append(f"linked={linked}")
             except Exception as e:
                 await session.rollback()
                 log.exception("amendment pass failed doc=%s", doc_id)

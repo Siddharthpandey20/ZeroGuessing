@@ -55,12 +55,24 @@ export default function Ask() {
   useEffect(() => setNotes([]), [chatId])
 
   /** The chat to act on; a brand-new chat is created on first use (a question or an upload). */
+  // one creation in flight at a time: two quick uploads (or an upload then a question) land in the same new chat
+  const creating = useRef<Promise<string> | null>(null)
+  useEffect(() => {
+    creating.current = null
+  }, [chatId])
   const ensureChat = useCallback(async () => {
     if (chatId) return chatId
-    const c = await post<ChatSummary>('/api/chats', {})
-    qc.invalidateQueries({ queryKey: ['chats'] })
-    nav(`/app/c/${c.id}`)
-    return c.id
+    creating.current ??= post<ChatSummary>('/api/chats', {}).then((c) => {
+      qc.invalidateQueries({ queryKey: ['chats'] })
+      nav(`/app/c/${c.id}`)
+      return c.id
+    })
+    try {
+      return await creating.current
+    } catch (e) {
+      creating.current = null
+      throw e
+    }
   }, [chatId, nav, qc])
 
   const ask = useCallback(
@@ -373,12 +385,22 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
   }, [fresh, turns])
   useEffect(() => () => stopSpeaking(), [chatId])
 
+  // Editing or re-running a past question continues the conversation from there: the questions and answers after it
+  // disappear at once (the server deletes them too), like ChatGPT.
+  const dropAfter = (turn: number) => {
+    void qc.cancelQueries({ queryKey: ['chat', chatId] })
+    qc.setQueryData<ChatDetail>(['chat', chatId], (d) => (d ? { ...d, turns: d.turns.filter((x) => x.turn <= turn) } : d))
+    setView((v) => Object.fromEntries(Object.entries(v).filter(([k]) => Number(k) <= turn)))
+    onSelect(null)
+  }
   const resend = (t: Turn, question: string, asOf: string, mode: InputMode) => {
     setEditing(null)
+    dropAfter(t.turn)
     void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}`, method: 'PUT', body: { question, as_of: asOf, input_mode: mode }, turn: t.turn, question, asOf },
       (m) => setView((v) => ({ ...v, [t.turn]: m.version })))
   }
   const regenerate = (t: Turn, m: Message) => {
+    dropAfter(t.turn)
     void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}/regenerate`, turn: t.turn, question: m.question, asOf: m.as_of },
       (msg) => setView((v) => ({ ...v, [t.turn]: msg.version })))
   }

@@ -1,6 +1,11 @@
+# Fixed project + volume names: the same database comes back whichever folder `docker compose` is run from
+# (a different project name silently means a new, empty volume: "my user and chats are gone").
+name: zeroguess
+
 services:
   db:
     image: pgvector/pgvector:pg17
+    restart: unless-stopped  # comes back by itself whenever Docker Desktop starts (e.g. after a reboot)
     environment:
       POSTGRES_USER: zeroguess
       POSTGRES_PASSWORD: zeroguess
@@ -17,9 +22,17 @@ services:
   api:
     build: .
     profiles: ["full"]
-    env_file: .env
+    restart: unless-stopped
+    env_file:  # repo-root .env and/or backend/.env (backend/.env wins)
+      - path: ../.env
+        required: false
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://zeroguess:zeroguess@db:5432/zeroguess
+      STORAGE_DIR: /app/data/files
+    volumes:
+      - files:/app/data/files  # uploaded PDFs survive container rebuilds and restarts
     ports:
       - "8000:8000"
     depends_on:
@@ -28,3 +41,6 @@ services:
 
 volumes:
   pgdata:
+    name: backend_pgdata  # the original volume name, so existing data is kept
+  files:
+    name: zeroguess_files

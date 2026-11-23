@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -8,6 +9,7 @@ from sqlalchemy import text
 from app.api import alerts, amendments, auth as auth_api, camera, chats, documents, shares
 from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
+from app.ingest.pipeline import resume_interrupted
 from app.security import auth_router, require_api_key
 
 logging.basicConfig(level=logging.INFO, format='{"t":"%(asctime)s","lvl":"%(levelname)s","log":"%(name)s","msg":"%(message)s"}')
@@ -24,7 +26,9 @@ async def lifespan(_: FastAPI):
     await init_db()
     async with SessionLocal() as session:
         await auth_api.seed_admin(session)
+    resume = asyncio.create_task(resume_interrupted())  # PDFs that were mid-ingest when the server/PC went down
     yield
+    resume.cancel()
     await engine.dispose()
 
 

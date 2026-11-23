@@ -53,7 +53,9 @@ Plan: `docs/RESEARCH_AND_PLAN.md`, Section L (current). Backend docs: `backend/R
 - **2026-11-23:** An amendment's `new_text` must appear (fuzzy ≥90) in the source clause, otherwise the verbatim clause text is stored.
 - **2026-11-23:** Amendments auto-confirm at confidence ≥0.8 with a resolved target document; otherwise `proposed` until a person confirms them.
 - **2026-11-23:** Faithfulness counts `supported` + `conflicted` claims as backed by a quote, over all draft claims.
-- **2026-11-23:** Edit and resend keeps later turns, because each answer depends only on the documents.
+- **2026-11-23:** ~~Edit and resend keeps later turns.~~ Changed: editing or re-running a question removes every later turn (like ChatGPT); the edited turn keeps its earlier versions.
+- **2026-11-23:** Interrupted or failed ingests are resumed on startup and re-read when the same PDF is uploaded again; amendments whose target was uploaded later are linked when it arrives (upload order no longer matters).
+- **2026-11-23:** `.env` may live at the repo root or in `backend/`; `STORAGE_DIR` is relative to `backend/`; compose project pinned to `zeroguess` with `restart: unless-stopped`. `start.ps1` brings everything up after a reboot.
 - **2026-11-23:** HTML share export is at `/public/shares/{token}/html` (avoids a route clash).
 - **Known gaps:** no Alembic yet; Cloud Run needs `--no-cpu-throttling`; one Story page-break row in Schedule I is kept as plain text; single API key, not user accounts.
 - **2026-11-23:** Merged with the frontend session's admin-key cookie (`/auth/session`) and `LLM_PROVIDER=fake`; both still work. Explicit headers take priority over cookies.
