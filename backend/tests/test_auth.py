@@ -1,11 +1,11 @@
 import httpx
 import pytest
-from sqlalchemy import text
 
 from app.api import auth as auth_api
 from app.config import get_settings
-from app.db import Base, engine, init_db
+from app.db import engine, init_db
 from app.main import app
+from tests.conftest import reset_db
 
 KEY = {"X-API-Key": "test-key"}
 
@@ -13,8 +13,7 @@ KEY = {"X-API-Key": "test-key"}
 @pytest.fixture
 async def client(monkeypatch):
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.drop_all)
+        await reset_db(conn)
     await init_db()
     s = get_settings()
     monkeypatch.setattr(s, "google_client_id", "test-client.apps.googleusercontent.com")

@@ -10,3 +10,14 @@ if not os.environ["DATABASE_URL"].rsplit("/", 1)[-1].split("?")[0].endswith("_te
 os.environ["API_KEY"] = "test-key"
 os.environ["STORAGE_DIR"] = tempfile.mkdtemp(prefix="zg-files-")
 os.environ.setdefault("GEMINI_API_KEY", "")
+
+
+async def reset_db(conn) -> None:
+    """Empty the test database: every table in it, CASCADE. Base.metadata.drop_all would drop only the tables this
+    checkout's models know, so a table another branch's tests created (with a foreign key to users) blocks it."""
+    from sqlalchemy import text
+
+    await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    names = (await conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))).scalars().all()
+    if names:
+        await conn.execute(text("DROP TABLE IF EXISTS " + ", ".join(f'"{n}"' for n in names) + " CASCADE"))

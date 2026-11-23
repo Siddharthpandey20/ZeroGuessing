@@ -1,14 +1,18 @@
 """Document Library API (plan K.3): upload, list with upload times + status, edit, disable, re-ingest, render."""
 
 import hashlib
+from dataclasses import dataclass
 from datetime import date, datetime
 
+import pymupdf
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.access import can_read, daily_limit, limit_message, readable_doc, sees_everything, used_today
+from app.core.amendments import decisions
 from app.core.render import render_crop, render_page
 from app.db import get_session
 from app.ingest.pipeline import DuplicateDocument, create_document, needs_ingest, requeue, run_ingest
@@ -39,6 +43,8 @@ class DocumentOut(BaseModel):
     n_amendments_proposed: int = 0
     n_amendments_confirmed: int = 0
     n_alerts: int = 0
+    hidden_text_ignored: int = 0
+    suspicious_text_ignored: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -67,26 +73,44 @@ async def upload_documents(
     return await store_uploads(session, bg, [(f.filename or "document.pdf", await f.read()) for f in files])
 
 
-async def user_usage(session: AsyncSession, user_id: str) -> dict[str, int]:
-    """{document_id: file_size} of the PDFs in this user's chats, each counted once; demo documents are free."""
+@dataclass
+class Quota:
+    """A signed-in user's allowance while their upload runs (S6). `held`: {document_id: file_size} of the PDFs in their
+    chats, demo documents excluded. `uploads_left`: new PDFs they may still add today. `added`: new PDFs this request
+    took (charged to the day once the upload is linked)."""
+    held: dict[str, int]
+    uploads_left: int
+    added: int = 0
+
+    def take(self, doc: Document) -> None:
+        if doc.source == "corpus" or doc.id in self.held:
+            return
+        self.held[doc.id] = doc.file_size
+        self.uploads_left -= 1
+        self.added += 1
+
+
+async def user_quota(session: AsyncSession, user_id: str) -> Quota:
     rows = await session.execute(
         select(Document.id, Document.file_size).join(ChatDocument, ChatDocument.document_id == Document.id)
         .join(Chat, Chat.id == ChatDocument.chat_id)
         .where(Chat.user_id == user_id, Document.source != "corpus").distinct())
-    return dict(rows.all())
+    return Quota(dict(rows.all()), daily_limit("upload") - await used_today(session, user_id, "upload"))
 
 
-async def _quota_refusal(session: AsyncSession, quota: dict[str, int], data: bytes) -> str | None:
+async def _quota_refusal(session: AsyncSession, quota: Quota, data: bytes) -> str | None:
     """Why this file would take the user past their quota, or None. A file they already have, or a demo document,
     costs nothing."""
     s = get_settings()
     found = (await session.execute(select(Document.id, Document.source)
                                    .where(Document.sha256 == hashlib.sha256(data).hexdigest()))).first()
-    if found and (found.id in quota or found.source == "corpus"):
+    if found and (found.id in quota.held or found.source == "corpus"):
         return None
-    if len(quota) >= s.max_user_documents:
+    if quota.uploads_left <= 0:
+        return limit_message("upload")
+    if len(quota.held) >= s.max_user_documents:
         return f"upload limit reached: at most {s.max_user_documents} PDFs per user (remove one to add another)"
-    used = sum(quota.values())
+    used = sum(quota.held.values())
     if used + len(data) > s.max_user_upload_mb * 1024 * 1024:
         left = max(0.0, s.max_user_upload_mb - used / 1024 / 1024)
         return (f"storage limit reached: at most {s.max_user_upload_mb} MB of PDFs per user "
@@ -94,13 +118,25 @@ async def _quota_refusal(session: AsyncSession, quota: dict[str, int], data: byt
     return None
 
 
+def _page_refusal(data: bytes) -> str | None:
+    """Unreadable, or more pages than one PDF may have (S6: parsing and embedding cost grow with pages)."""
+    try:
+        with pymupdf.open(stream=data, filetype="pdf") as pdf:
+            pages = pdf.page_count
+    except Exception:
+        return "this file could not be read as a PDF"
+    cap = get_settings().max_pdf_pages
+    return f"too many pages: {pages} (at most {cap} pages per PDF)" if pages > cap else None
+
+
 async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[tuple[str, bytes]],
-                        source: str = "upload", quota: dict[str, int] | None = None) -> list[UploadResult]:
+                        source: str = "upload", quota: Quota | None = None,
+                        uploaded_by: str | None = None) -> list[UploadResult]:
     """Validate, store and queue ingestion for each PDF. A file already stored (same sha256) is reported as a
     duplicate with its existing id, so a chat can link it without ingesting it twice.
 
-    `quota` (from user_usage) turns on the per-user limits; it is updated in place as files are accepted, so a batch
-    is admitted in order until the limit is hit and the rest are rejected."""
+    `quota` (from user_quota) turns on the per-user limits; it is updated in place as files are accepted, so a batch
+    is admitted in order until a limit is hit and the rest are rejected."""
     limit = get_settings().max_upload_mb * 1024 * 1024
     out = []
     for name, data in items:
@@ -110,23 +146,26 @@ async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[
         if len(data) > limit:
             out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail="file too large"))
             continue
+        if refusal := _page_refusal(data):
+            out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail=refusal))
+            continue
         if quota is not None and (refusal := await _quota_refusal(session, quota, data)):
             out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail=refusal))
             continue
         try:
-            doc, job = await create_document(session, data, name, source=source)
+            doc, job = await create_document(session, data, name, source=source, uploaded_by=uploaded_by)
         except DuplicateDocument as d:
             job_id = None
             if needs_ingest(d.doc):  # stored before but its reading failed or was cut off by a restart: read it again
                 job = await requeue(session, d.doc)
                 bg.add_task(run_ingest, d.doc.id, job.id)
                 job_id = job.id
-            if quota is not None and d.doc.source != "corpus":
-                quota[d.doc.id] = d.doc.file_size
+            if quota is not None:
+                quota.take(d.doc)
             out.append(UploadResult(filename=name, document_id=d.doc.id, job_id=job_id, status="duplicate"))
             continue
         if quota is not None:
-            quota[doc.id] = doc.file_size
+            quota.take(doc)
         bg.add_task(run_ingest, doc.id, job.id)
         out.append(UploadResult(filename=name, document_id=doc.id, job_id=job.id, status="queued"))
     return out
@@ -167,6 +206,13 @@ async def list_documents(
         stmt = stmt.where(Document.title.ilike(f"%{q}%"))
     docs = (await session.execute(stmt)).scalars().all()
     counts = await _counts(session)
+    if not p.is_admin and (decided := await decisions(session, p.user_id)):
+        # S3: the user's own amendment decisions move their counts (proposed -> confirmed / rejected) for them only
+        for am in (await session.execute(select(Amendment).where(Amendment.id.in_(decided)))).scalars():
+            c = counts.setdefault(am.source_doc_id, {})
+            for st, n in ((am.status, -1), (decided[am.id], 1)):
+                if st in ("proposed", "confirmed"):
+                    c[f"n_amendments_{st}"] = c.get(f"n_amendments_{st}", 0) + n
     return [DocumentOut.model_validate(d).model_copy(update=counts.get(d.id, {})) for d in docs]
 
 
@@ -178,8 +224,8 @@ async def _get_doc(session: AsyncSession, doc_id: str) -> Document:
 
 
 @router.get("/documents/{doc_id}")
-async def get_document(doc_id: str, session: AsyncSession = Depends(get_session)):
-    doc = await _get_doc(session, doc_id)
+async def get_document(doc_id: str, session: AsyncSession = Depends(get_session), p: Principal = Depends(get_principal)):
+    doc = await readable_doc(session, p, doc_id)
     clauses = (await session.execute(select(Clause).where(Clause.document_id == doc_id).order_by(Clause.ord))).scalars().all()
     counts = (await _counts(session)).get(doc_id, {})
     return {
@@ -210,8 +256,8 @@ async def reingest(doc_id: str, bg: BackgroundTasks, session: AsyncSession = Dep
 
 
 @router.get("/documents/{doc_id}/file")
-async def get_file(doc_id: str, session: AsyncSession = Depends(get_session)):
-    doc = await _get_doc(session, doc_id)
+async def get_file(doc_id: str, session: AsyncSession = Depends(get_session), p: Principal = Depends(get_principal)):
+    doc = await readable_doc(session, p, doc_id)
     return Response(get_storage().get(doc.storage_key), media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
 
@@ -220,8 +266,9 @@ async def get_file(doc_id: str, session: AsyncSession = Depends(get_session)):
 async def page_image(
     doc_id: str, page_no: int, highlight: str = Query("", description="comma-separated sentence ids"),
     dpi: int = Query(110, ge=50, le=200), session: AsyncSession = Depends(get_session),
+    p: Principal = Depends(get_principal),
 ):
-    doc = await _get_doc(session, doc_id)
+    doc = await readable_doc(session, p, doc_id)
     boxes: list[list[float]] = []
     ids = [s for s in highlight.split(",") if s]
     if ids:
@@ -235,9 +282,10 @@ async def page_image(
 
 
 @router.get("/sentences/{sentence_id}/preview.png")
-async def sentence_preview(sentence_id: str, session: AsyncSession = Depends(get_session)):
+async def sentence_preview(sentence_id: str, session: AsyncSession = Depends(get_session),
+                           p: Principal = Depends(get_principal)):
     s = await session.get(Sentence, sentence_id)
-    if s is None or not s.bboxes:
+    if s is None or not s.bboxes or not await can_read(session, p, s.document_id):
         raise HTTPException(404, "sentence not found")
     doc = await _get_doc(session, s.document_id)
     png = render_crop(get_storage().get(doc.storage_key), s.bboxes)
@@ -245,9 +293,9 @@ async def sentence_preview(sentence_id: str, session: AsyncSession = Depends(get
 
 
 @router.get("/jobs/{job_id}")
-async def get_job(job_id: str, session: AsyncSession = Depends(get_session)):
+async def get_job(job_id: str, session: AsyncSession = Depends(get_session), p: Principal = Depends(get_principal)):
     job = await session.get(Job, job_id)
-    if job is None:
+    if job is None or not (sees_everything(p) or await can_read(session, p, job.document_id)):
         raise HTTPException(404, "job not found")
     return {"id": job.id, "kind": job.kind, "status": job.status, "document_id": job.document_id,
             "detail": job.detail, "created_at": job.created_at, "finished_at": job.finished_at}

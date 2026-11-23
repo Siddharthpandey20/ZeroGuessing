@@ -1,11 +1,11 @@
 import httpx
 import pytest
-from sqlalchemy import text
 
-from app.db import Base, engine, init_db
+from app.db import engine, init_db
 from app.ingest.htmlpdf import html_to_pdf
 from app.main import app
 from tests.test_parse import HTML
+from tests.conftest import reset_db
 
 H = {"X-API-Key": "test-key"}
 
@@ -13,8 +13,7 @@ H = {"X-API-Key": "test-key"}
 @pytest.fixture
 async def client():
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.drop_all)
+        await reset_db(conn)
     await init_db()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         yield c

@@ -185,6 +185,9 @@ export interface DocumentRow {
   n_amendments_proposed: number
   n_amendments_confirmed: number
   n_alerts: number
+  /** passages left out when the PDF was read: invisible to a reader, or written as instructions to an AI */
+  hidden_text_ignored?: number
+  suspicious_text_ignored?: number
 }
 
 export interface ClauseRow {
@@ -217,6 +220,10 @@ export interface Amendment {
   trigger_phrase: string | null
   confidence: number | null
   status: 'proposed' | 'confirmed' | 'rejected'
+  /** why it was not applied by itself (a person has to confirm it) */
+  review_reason?: string | null
+  /** this user may confirm or reject it (both documents are theirs, or they are an admin) */
+  can_decide?: boolean
 }
 
 export interface User {
@@ -255,6 +262,10 @@ export interface ChatDoc {
   ingest_status: string
   ingest_error: string | null
   added_at: string
+  hidden_text_ignored?: number
+  suspicious_text_ignored?: number
+  /** changes this document makes to another that wait for the user to confirm */
+  n_amendments_proposed?: number
 }
 
 export interface UploadResult {

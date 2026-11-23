@@ -6,6 +6,7 @@ import asyncio
 import os
 
 import httpx
+import pymupdf
 
 from app.config import get_settings
 from tests.test_chat_docs import KEY, client, sign_in  # noqa: F401  (fixture)
@@ -13,9 +14,13 @@ from tests.test_chat_docs import KEY, client, sign_in  # noqa: F401  (fixture)
 MB = 1024 * 1024
 
 
-def fake_pdf(name: str, size: int = 2048):
-    """Unique bytes that pass the %PDF check; they fail to parse later, which doesn't matter to the quota."""
-    return ("files", (name, b"%PDF-1.4\n" + os.urandom(size - 9), "application/pdf"))
+def fake_pdf(name: str, size: int = 2048, pages: int = 1):
+    """A real, unique PDF of about `size` bytes (random padding in an attached file, which doesn't compress)."""
+    doc = pymupdf.open()
+    for i in range(pages):
+        doc.new_page().insert_text((72, 72), f"{name} page {i + 1} {os.urandom(4).hex()}")
+    doc.embfile_add("pad", os.urandom(max(0, size - 1500)))
+    return ("files", (name, doc.tobytes(), "application/pdf"))
 
 
 async def new_chat(c: httpx.AsyncClient, **kw) -> str:
