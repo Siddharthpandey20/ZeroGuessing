@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
-import { VideoLoop } from '../../components/VideoLoop'
 import { reducedMotion } from '../../lib/motion'
-import heroWebm from '../../assets/video/hero-glass.webm'
-import heroMp4 from '../../assets/video/hero-glass.mp4'
+import { Specimen } from './Specimen'
 import styles from './HeroScene.module.css'
 
-// The monitor's screen inside the 800x600 drawing; the video is placed and clipped to exactly this box.
+// The monitor's screen inside the 800x600 drawing; the miniature chat is placed and clipped to exactly this box.
 const SCREEN = { x: 214, y: 124, w: 372, h: 214 }
 const VB = { w: 800, h: 600 }
 const pct = (n: number, of: number) => `${(n / of) * 100}%`
+
+const HOLD_MS = 2400 // the big scene holds this long after the intro
+const SHRINK_MS = 1700 // keep in step with .scene's transform transition
+const GROW_MS = 1150 // the chat card growing out of the screen
+const EASE = 'cubic-bezier(0.65, 0, 0.25, 1)'
 
 interface Anchors {
   hero: RefObject<HTMLElement | null>
@@ -26,16 +29,20 @@ function textRect(el: Element | null) {
 }
 
 /**
- * Someone at a desk, viewed from behind, with the product video playing on their monitor.
- * It opens large in the middle of the hero, holds for a beat, then the whole scene (one unit: person, desk,
- * monitor and the playing video) scales down and settles in the gap beside the headline, level with the buttons.
+ * Someone at a desk, seen from behind, with the answer card playing out on their monitor.
+ * 1. Only this scene shows, large, under the wordmark, while the check runs on the screen.
+ * 2. The whole scene (one unit) scales down and settles beside the headline, level with the buttons.
+ * 3. The answer card then grows out of that small screen, from the screen's exact box to its own place.
  * Laid out at its final box; the opening size is a transform on top of it, so nothing reflows.
  */
-export function HeroScene({ play, anchors }: { play: boolean; anchors: Anchors }) {
+export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchors: Anchors; onRevealed: () => void }) {
   const [box, setBox] = useState<{ left: number; top: number; width: number } | null>(null)
   const [from, setFrom] = useState<string | null>(null)
+  const [cardW, setCardW] = useState(520)
   const [settled, setSettled] = useState(false)
   const settledRef = useRef(false)
+  const revealed = useRef(false)
+  const screenRef = useRef<HTMLDivElement>(null)
 
   const measure = useCallback(() => {
     const hero = anchors.hero.current, copy = anchors.copy.current, actions = anchors.actions.current, spec = anchors.spec.current
@@ -43,7 +50,9 @@ export function HeroScene({ play, anchors }: { play: boolean; anchors: Anchors }
     const H = hero.getBoundingClientRect()
     const textRight = Math.max(...[...copy.children].map((c) => textRect(c)?.right ?? 0))
     const act = textRect(actions)!
-    const gap = spec.getBoundingClientRect().left - textRight
+    const S = spec.getBoundingClientRect()
+    if (!revealed.current) setCardW(Math.round(spec.offsetWidth) || 520)
+    const gap = S.left - textRight
     let width: number, left: number
     if (window.innerWidth > 768 && gap >= 170) {
       width = Math.min(gap - 48, 320)
@@ -62,8 +71,7 @@ export function HeroScene({ play, anchors }: { play: boolean; anchors: Anchors }
     const wi = wide ? Math.min(H.width * 0.6, 860) : H.width * 0.92
     const cx = H.width / 2
     const cy = (wide ? H.height : Math.min(H.height, window.innerHeight)) * (wide ? 0.6 : 0.58)
-    const s = wi / width
-    setFrom(`translate(${cx - (left + width / 2)}px, ${cy - (top + height / 2)}px) scale(${s})`)
+    setFrom(`translate(${cx - (left + width / 2)}px, ${cy - (top + height / 2)}px) scale(${wi / width})`)
   }, [anchors])
 
   useLayoutEffect(() => {
@@ -81,17 +89,51 @@ export function HeroScene({ play, anchors }: { play: boolean; anchors: Anchors }
     }
   }, [measure])
 
+  /** FLIP the card from the small screen's box to its own: same top crop, so it reads as the screen opening up. */
+  const reveal = useCallback(() => {
+    const spec = anchors.spec.current, screen = screenRef.current
+    if (!spec || revealed.current) return
+    revealed.current = true
+    const clear = () => {
+      spec.style.transition = spec.style.transform = spec.style.clipPath = spec.style.transformOrigin = ''
+      spec.style.opacity = '1' // stays inline: the card is shown from here on, whatever the hero's own reveal says
+      onRevealed()
+    }
+    if (!screen || reducedMotion()) return clear()
+    spec.style.transition = 'none'
+    spec.style.transform = 'none'
+    const C = spec.getBoundingClientRect()
+    const S = screen.getBoundingClientRect()
+    const s = S.width / C.width
+    const cropBottom = Math.max(0, C.height - S.height / s)
+    const r0 = 6 / s
+    spec.style.transformOrigin = '0 0'
+    spec.style.transform = `translate(${S.left - C.left}px, ${S.top - C.top}px) scale(${s})`
+    spec.style.clipPath = `inset(0px 0px ${cropBottom}px 0px round ${r0}px)`
+    spec.style.opacity = '1'
+    void spec.offsetWidth // commit the start frame before animating
+    spec.style.transition = `transform ${GROW_MS}ms ${EASE}, clip-path ${GROW_MS}ms ${EASE}`
+    spec.style.transform = 'none'
+    spec.style.clipPath = 'inset(-80px -80px -80px -80px round 0px)' // past the card, so its shadow is not cut
+    window.setTimeout(clear, GROW_MS + 60)
+  }, [anchors, onRevealed])
+
   useEffect(() => {
     if (!play || settledRef.current) return
     const done = () => {
       settledRef.current = true
       setSettled(true)
     }
-    if (reducedMotion()) return done()
-    const t = window.setTimeout(done, 2400)
-    return () => clearTimeout(t)
-  }, [play])
+    if (reducedMotion()) {
+      done()
+      reveal()
+      return
+    }
+    const ids = [window.setTimeout(done, HOLD_MS), window.setTimeout(reveal, HOLD_MS + SHRINK_MS - 150)]
+    return () => ids.forEach(clearTimeout)
+  }, [play, reveal])
 
+  const screenPx = box ? box.width * (SCREEN.w / VB.w) : 0
   const style: CSSProperties = box
     ? { left: box.left, top: box.top, width: box.width, transform: settled || !from ? 'none' : from }
     : { visibility: 'hidden' }
@@ -100,8 +142,11 @@ export function HeroScene({ play, anchors }: { play: boolean; anchors: Anchors }
     <div className={styles.scene} style={style} data-play={play || undefined} data-settled={settled || undefined} aria-hidden="true">
       <div className={styles.frame}>
         <SceneBack />
-        <div className={styles.screen} style={{ left: pct(SCREEN.x, VB.w), top: pct(SCREEN.y, VB.h), width: pct(SCREEN.w, VB.w), height: pct(SCREEN.h, VB.h) }}>
-          <VideoLoop className={styles.video} webm={heroWebm} mp4={heroMp4} poster="/hero-glass-poster.webp" eager />
+        <div ref={screenRef} className={styles.screen} style={{ left: pct(SCREEN.x, VB.w), top: pct(SCREEN.y, VB.h), width: pct(SCREEN.w, VB.w), height: pct(SCREEN.h, VB.h) }}>
+          {/* the same answer card, laid out at its real width and scaled into the screen */}
+          <div className={styles.mini} style={{ width: cardW, transform: `scale(${screenPx / cardW})` }} inert>
+            <Specimen start={play} />
+          </div>
           <span className={styles.glare} />
         </div>
         <SceneFront />

@@ -73,6 +73,9 @@ export default function Landing() {
   const copyRef = useRef<HTMLDivElement>(null)
   const actionsRef = useRef<HTMLDivElement>(null)
   const specRef = useRef<HTMLDivElement>(null)
+  // the answer card waits, hidden, until it grows out of the monitor in the hero scene
+  const [specHeld, setSpecHeld] = useState(true)
+  const onSpecRevealed = useCallback(() => setSpecHeld(false), [])
   const sceneAnchors = useMemo(() => ({ hero: heroRef, copy: copyRef, actions: actionsRef, spec: specRef }), [])
 
   return (
@@ -85,7 +88,7 @@ export default function Landing() {
       {/* ---------- hero: rendered glass video, full-width wordmark, headline, live specimen ---------- */}
       <header className={styles.heroWrap} data-section="Start">
         <div ref={heroRef} className={styles.hero} data-play={play || undefined}>
-          <HeroScene play={play} anchors={sceneAnchors} />
+          <HeroScene play={play} anchors={sceneAnchors} onRevealed={onSpecRevealed} />
           <div className={styles.veil} aria-hidden="true" />
           <span className={`${styles.corner} ${styles.cTL}`} aria-hidden="true" />
           <span className={`${styles.corner} ${styles.cTR}`} aria-hidden="true" />
@@ -125,9 +128,9 @@ export default function Landing() {
                 <a href="#checks" className="btn btn-hud">How it checks</a>
               </div>
             </div>
-            <div ref={specRef} className={styles.heroSpecimen}>
+            <div ref={specRef} className={styles.heroSpecimen} data-held={specHeld || undefined}>
               <div ref={tilt} className={styles.tilt}>
-                <Specimen />
+                <Specimen start={play} />
               </div>
             </div>
           </div>

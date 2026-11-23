@@ -59,6 +59,8 @@
 .heroCopy { grid-column: 1 / span 6; display: grid; gap: var(--space-lg); }
 .heroSpecimen { grid-column: 8 / span 5; align-self: end; opacity: 0; transform: translateY(40px); transition: opacity 900ms ease 1100ms, transform 1200ms var(--ease-out) 1100ms; }
 .hero[data-play] .heroSpecimen { opacity: 1; transform: none; }
+/* held while the hero scene plays; it appears by growing out of the monitor (inline styles from HeroScene) */
+.hero .heroSpecimen[data-held] { opacity: 0; transition: none; }
 .tilt { transform-style: preserve-3d; will-change: transform; }
 
 .h1 { font-size: clamp(2.5rem, 4.6vw + 0.4rem, 5.25rem); font-weight: 560; line-height: 0.96; letter-spacing: -0.045em; color: var(--color-ink); max-width: 11ch; }

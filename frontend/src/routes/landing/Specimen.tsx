@@ -20,7 +20,7 @@ const CLAIMS = [
 const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
 /** The hero's signature: the pipeline playing out on one real question from the demo corpus. */
-export function Specimen() {
+export function Specimen({ start = true }: { start?: boolean }) {
   // step: 0 retrieving, 1 drafting, 2..4 verifying claim n, 5 done
   const [step, setStep] = useState(0)
   const [run, setRun] = useState(0)
@@ -31,10 +31,11 @@ export function Specimen() {
       return
     }
     setStep(0)
+    if (!start) return // held until the hero plays, so the card and its copy on the monitor run in step
     const times = [900, 1700, 2400, 3100, 3800]
     const ids = times.map((t, i) => window.setTimeout(() => setStep(i + 1), t))
     return () => ids.forEach(clearTimeout)
-  }, [run])
+  }, [run, start])
 
   const readout =
     step === 0 ? 'Retrieving from 7 documents'

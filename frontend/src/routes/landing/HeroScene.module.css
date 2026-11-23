@@ -10,8 +10,10 @@
 .scene[data-play] { opacity: 1; }
 .frame { position: relative; width: 100%; aspect-ratio: 4 / 3; }
 .layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-/* the playing video, clipped to the monitor's screen */
-.screen { position: absolute; overflow: hidden; border-radius: 1.6% / 2.8%; background: var(--color-ink); }
-.video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 55%; display: block; }
+/* the monitor screen: the answer card in miniature, clipped to the glass */
+.screen { position: absolute; overflow: hidden; border-radius: 1.6% / 2.8%; background: var(--color-paper-2); }
+/* the answer card at its real width, scaled into the screen from the top-left; the screen crops its lower part */
+.mini { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+.mini > figure { box-shadow: none; }
 .glare { position: absolute; inset: 0; background: linear-gradient(125deg, oklch(100% 0 0 / 0.14) 0%, transparent 38%); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .scene { transition: none; opacity: 1; } }
