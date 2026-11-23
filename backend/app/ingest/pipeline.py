@@ -110,6 +110,11 @@ async def _run_ingest(doc_id: str, job_id: str | None = None) -> None:
 
             data = get_storage().get(doc.storage_key)
             parsed = await asyncio.to_thread(parse_pdf, data)
+            if not parsed.clauses:
+                if parsed.unread_pages:
+                    raise ValueError("This PDF is a scan (pages are images) and OCR is not installed on this server, "
+                                     "so it can't be read. Install Tesseract, or upload a PDF with a text layer.")
+                raise ValueError("No readable text was found in this PDF.")
 
             await session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
             await session.execute(delete(Sentence).where(Sentence.document_id == doc.id))
@@ -159,6 +164,10 @@ async def _run_ingest(doc_id: str, job_id: str | None = None) -> None:
 
             # amendment pass + contradiction scan: failures here never fail ingestion (doc stays searchable)
             notes = []
+            if parsed.ocr_pages:
+                notes.append(f"ocr_pages={parsed.ocr_pages}")
+            if parsed.unread_pages:
+                notes.append(f"unread_scanned_pages={parsed.unread_pages}")
             try:
                 from app.core.amendments import extract_for_document, resolve_targets
 

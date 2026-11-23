@@ -1,9 +1,14 @@
 """PDF -> clauses -> sentences with exact bboxes; tables row-wise with header repeated (plan Q1).
 
-Born-digital PDFs only (OCR is out of scope). Geometry comes from PyMuPDF rawdict (per-char bboxes),
-so each sentence's highlight rectangles are exact, per line.
+Born-digital pages are read from their text layer. A scanned page (no text layer) is read with Tesseract OCR through
+PyMuPDF (English + Hindi), which yields the same rawdict structure in page coordinates, so clauses, citations and
+highlights work the same way. Geometry comes from PyMuPDF rawdict (per-char bboxes), so each sentence's highlight
+rectangles are exact, per line.
 """
 
+import functools
+import logging
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -11,6 +16,25 @@ from dataclasses import dataclass, field
 import pymupdf
 
 from app.core.normalise import extract_values
+
+log = logging.getLogger(__name__)
+OCR_LANGS = os.environ.get("OCR_LANGS", "eng+hin")
+OCR_DPI = int(os.environ.get("OCR_DPI", "300"))
+
+
+@functools.cache
+def ocr_tessdata() -> str | None:
+    """Tesseract's language folder, or None when OCR isn't installed (scanned pages are then reported, not read)."""
+    try:
+        return pymupdf.get_tessdata()
+    except Exception:
+        return None
+
+
+def _needs_ocr(page: pymupdf.Page) -> bool:
+    """A page with images but (almost) no text layer: a scan or a photo of a page."""
+    return len(page.get_text("text").strip()) < 20 and bool(page.get_images(full=False))
+
 
 # bbox entries are [page, x0, y0, x1, y1] (page 1-based, PDF points)
 BBox = list[float]
@@ -49,6 +73,8 @@ class PDoc:
     issue_date: str | None
     doc_type: str
     clauses: list[PClause]
+    ocr_pages: list[int] = field(default_factory=list)  # 1-based pages read with OCR
+    unread_pages: list[int] = field(default_factory=list)  # scanned pages that could not be read (no OCR installed)
 
 
 @dataclass
@@ -83,9 +109,9 @@ def _is_bold(span: dict) -> bool:
     return bool(span["flags"] & 16) or "bold" in span["font"].lower()
 
 
-def _page_lines(page: pymupdf.Page, pno: int, table_rects: list[pymupdf.Rect]) -> list[_Line]:
+def _page_lines(page: pymupdf.Page, pno: int, table_rects: list[pymupdf.Rect], textpage=None) -> list[_Line]:
     out = []
-    raw = page.get_text("rawdict", flags=pymupdf.TEXTFLAGS_TEXT & ~pymupdf.TEXT_PRESERVE_LIGATURES)
+    raw = page.get_text("rawdict", flags=pymupdf.TEXTFLAGS_TEXT & ~pymupdf.TEXT_PRESERVE_LIGATURES, textpage=textpage)
     for block in raw["blocks"]:
         first = True
         for line in block.get("lines", []):
@@ -227,7 +253,25 @@ def _guess_type(title: str) -> str:
 def parse_pdf(data: bytes) -> PDoc:
     doc = pymupdf.open(stream=data, filetype="pdf")
     tables_by_page, lines_by_page = [], []
+    ocr_pages, unread = [], []
     for pno, page in enumerate(doc):
+        if _needs_ocr(page):
+            tess = ocr_tessdata()
+            if tess is None:
+                unread.append(pno + 1)
+                tables_by_page.append([])
+                lines_by_page.append([])
+                continue
+            try:
+                tp = page.get_textpage_ocr(language=OCR_LANGS, dpi=OCR_DPI, full=True, tessdata=tess)
+                lines_by_page.append(_page_lines(page, pno + 1, [], textpage=tp))
+                ocr_pages.append(pno + 1)
+            except Exception as e:  # one bad page never fails the document
+                log.warning("OCR failed on page %d: %s", pno + 1, e)
+                lines_by_page.append([])
+                unread.append(pno + 1)
+            tables_by_page.append([])  # table finding needs a text layer; OCR rows still read as lines
+            continue
         tabs = []
         try:
             for t in page.find_tables().tables:
@@ -345,8 +389,7 @@ def parse_pdf(data: bytes) -> PDoc:
         circular_no=circ,
         issue_date=str(dates[0]) if dates else None,
         doc_type=_guess_type(title),
-        clauses=clauses,
-    )
+        clauses=clauses, ocr_pages=ocr_pages, unread_pages=unread)
 
 
 def _title(lines: list[_Line]) -> str:

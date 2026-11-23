@@ -42,3 +42,24 @@ def test_table_rows_span_pages_with_header():
     assert len(rows) == 45, len(rows)
     assert {s.page for s in rows} == {1, 2} or len({s.page for s in rows}) >= 2
     assert "Charge: Charge 45 | Product: Home loan | Amount: Rs. 4500" in rows[-1].text
+
+
+def test_scanned_pdf_is_read_with_ocr_or_reported():
+    """A page that is only a picture: read with Tesseract where it's installed (the Docker image), otherwise
+    reported as unread so ingestion can say why, never silently empty."""
+    import pymupdf
+
+    from app.ingest.htmlpdf import html_to_pdf
+    from app.ingest.parse import ocr_tessdata, parse_pdf
+
+    src = pymupdf.open(stream=html_to_pdf("<h1>Master Policy</h1><p>7.2 The prepayment penalty shall be 2% of the "
+                                          "outstanding principal.</p>"), filetype="pdf")
+    scan = pymupdf.open()
+    for page in src:
+        p = scan.new_page(width=page.rect.width, height=page.rect.height)
+        p.insert_image(p.rect, pixmap=page.get_pixmap(dpi=200))
+    doc = parse_pdf(scan.tobytes())
+    if ocr_tessdata() is None:
+        assert doc.unread_pages == [1] and not doc.clauses
+    else:
+        assert doc.ocr_pages == [1] and "2%" in " ".join(c.text for c in doc.clauses)
