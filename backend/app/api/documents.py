@@ -1,5 +1,6 @@
 """Document Library API (plan K.3): upload, list with upload times + status, edit, disable, re-ingest, render."""
 
+import hashlib
 from datetime import date, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile
@@ -66,10 +67,40 @@ async def upload_documents(
     return await store_uploads(session, bg, [(f.filename or "document.pdf", await f.read()) for f in files])
 
 
+async def user_usage(session: AsyncSession, user_id: str) -> dict[str, int]:
+    """{document_id: file_size} of the PDFs in this user's chats, each counted once; demo documents are free."""
+    rows = await session.execute(
+        select(Document.id, Document.file_size).join(ChatDocument, ChatDocument.document_id == Document.id)
+        .join(Chat, Chat.id == ChatDocument.chat_id)
+        .where(Chat.user_id == user_id, Document.source != "corpus").distinct())
+    return dict(rows.all())
+
+
+async def _quota_refusal(session: AsyncSession, quota: dict[str, int], data: bytes) -> str | None:
+    """Why this file would take the user past their quota, or None. A file they already have, or a demo document,
+    costs nothing."""
+    s = get_settings()
+    found = (await session.execute(select(Document.id, Document.source)
+                                   .where(Document.sha256 == hashlib.sha256(data).hexdigest()))).first()
+    if found and (found.id in quota or found.source == "corpus"):
+        return None
+    if len(quota) >= s.max_user_documents:
+        return f"upload limit reached: at most {s.max_user_documents} PDFs per user (remove one to add another)"
+    used = sum(quota.values())
+    if used + len(data) > s.max_user_upload_mb * 1024 * 1024:
+        left = max(0.0, s.max_user_upload_mb - used / 1024 / 1024)
+        return (f"storage limit reached: at most {s.max_user_upload_mb} MB of PDFs per user "
+                f"({left:.1f} MB left, this file is {len(data) / 1024 / 1024:.1f} MB)")
+    return None
+
+
 async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[tuple[str, bytes]],
-                        source: str = "upload") -> list[UploadResult]:
+                        source: str = "upload", quota: dict[str, int] | None = None) -> list[UploadResult]:
     """Validate, store and queue ingestion for each PDF. A file already stored (same sha256) is reported as a
-    duplicate with its existing id, so a chat can link it without ingesting it twice."""
+    duplicate with its existing id, so a chat can link it without ingesting it twice.
+
+    `quota` (from user_usage) turns on the per-user limits; it is updated in place as files are accepted, so a batch
+    is admitted in order until the limit is hit and the rest are rejected."""
     limit = get_settings().max_upload_mb * 1024 * 1024
     out = []
     for name, data in items:
@@ -79,6 +110,9 @@ async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[
         if len(data) > limit:
             out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail="file too large"))
             continue
+        if quota is not None and (refusal := await _quota_refusal(session, quota, data)):
+            out.append(UploadResult(filename=name, document_id=None, job_id=None, status="rejected", detail=refusal))
+            continue
         try:
             doc, job = await create_document(session, data, name, source=source)
         except DuplicateDocument as d:
@@ -87,8 +121,12 @@ async def store_uploads(session: AsyncSession, bg: BackgroundTasks, items: list[
                 job = await requeue(session, d.doc)
                 bg.add_task(run_ingest, d.doc.id, job.id)
                 job_id = job.id
+            if quota is not None and d.doc.source != "corpus":
+                quota[d.doc.id] = d.doc.file_size
             out.append(UploadResult(filename=name, document_id=d.doc.id, job_id=job_id, status="duplicate"))
             continue
+        if quota is not None:
+            quota[doc.id] = doc.file_size
         bg.add_task(run_ingest, doc.id, job.id)
         out.append(UploadResult(filename=name, document_id=doc.id, job_id=job.id, status="queued"))
     return out

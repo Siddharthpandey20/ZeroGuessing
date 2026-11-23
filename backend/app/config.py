@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     min_dense_score: float = 0.35  # abstention gate: best cosine below this -> no proof
 
     max_upload_mb: int = 40
+    # per-user quota on the PDFs in a signed-in user's chats (admins and the service key are exempt). Counted over the
+    # distinct documents linked to their chats, demo documents excluded: removing a PDF from every chat frees its slot.
+    max_user_documents: int = 5
+    max_user_upload_mb: int = 30
     amend_autoconfirm: float = 0.8  # amendments below this confidence (or unresolved target) wait for a human
     max_evidence: int = 40  # sentences sent to the drafter
     answer_cache: bool = True
