@@ -181,6 +181,9 @@ export default function Landing() {
             </Link>
           </Reveal>
         </section>
+
+        <IndexBar left="N.006" mid="FAQ" right="N.006" />
+        <Faq />
       </main>
 
       <footer className={styles.footer}>
@@ -193,12 +196,53 @@ export default function Landing() {
             <a href="#checks">How it checks</a>
             <a href="#measured">Measured</a>
             <a href="#safeguards">Safeguards</a>
+            <a href="#faq">FAQ</a>
             <Link to={enter}>Workspace</Link>
           </nav>
           <ThemeToggle />
         </div>
       </footer>
     </div>
+  )
+}
+
+const FAQS: { q: string; a: string }[] = [
+  {
+    q: 'How is this different from asking a chatbot about my PDF?',
+    a: 'A chatbot writes an answer and attaches sources; nothing checks that the source says what the sentence claims. Here every sentence is checked by code before you see it: the quote must exist word for word, every number and date in the sentence must appear in that quote, and the clause must be in force on your date. A sentence that fails is blocked, and shown struck through with the reason.',
+  },
+  {
+    q: 'What happens when my documents don’t have the answer?',
+    a: 'You get “I don’t have proof” instead of a guess, with what was searched and the closest passages found, so you can see why. If part of a question is proven and part is not, you get the proven part and a clear note on what is missing.',
+  },
+  {
+    q: 'Which version of a rule does it use?',
+    a: 'The one in force on the date you pick, today by default. When a circular amends a policy, even through a chain of circulars, the answer uses the current wording and shows each change behind it, including changes that start on a future date.',
+  },
+  {
+    q: 'Can I ask in Hindi or Chhattisgarhi?',
+    a: 'Yes, by typing or speaking, and you can hear the answer read aloud. Answers are verified on the English source and then translated; a translation that changes any number is dropped, and the English original is one tap away.',
+  },
+  {
+    q: 'What does the faithfulness score mean?',
+    a: 'It is the share of the sentences the model drafted that are backed by a matching quote from your documents. Sentences that fail verification are never shown as the answer, but they count against the score, so you can see how much was blocked.',
+  },
+]
+
+/** Five common questions, as a native disclosure list: keyboard and screen-reader friendly, no script needed. */
+function Faq() {
+  return (
+    <section id="faq" className={styles.faq} data-section="FAQ" aria-labelledby="faq-title">
+      <h2 id="faq-title" className={styles.faqH}>Questions people ask.</h2>
+      <div className={styles.faqList}>
+        {FAQS.map((f) => (
+          <details key={f.q} className={styles.faqItem}>
+            <summary className={styles.faqQ}>{f.q}</summary>
+            <p className={styles.faqA}>{f.a}</p>
+          </details>
+        ))}
+      </div>
+    </section>
   )
 }
 
