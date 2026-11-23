@@ -164,6 +164,8 @@ class Chat(Base):
     title: Mapped[str] = mapped_column(Text, default="New chat")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # the last message of the branch on screen; the conversation is the path from it up through parent_id
+    current_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class ChatDocument(Base):
@@ -178,8 +180,11 @@ class Message(Base):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"), index=True)
-    turn: Mapped[int] = mapped_column(Integer)
-    version: Mapped[int] = mapped_column(Integer, default=1)
+    turn: Mapped[int] = mapped_column(Integer)  # depth in the conversation, 1-based
+    version: Mapped[int] = mapped_column(Integer, default=1)  # among siblings (same parent): 1 of n, 2 of n...
+    # the message this one follows (ChatGPT-style branches: editing a question adds a sibling, later turns hang
+    # off whichever version they followed, so switching versions brings back that branch's follow-ups)
+    parent_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     question: Mapped[str] = mapped_column(Text)
     input_mode: Mapped[str] = mapped_column(String(8), default="typed")  # typed|camera|voice
     as_of: Mapped[date] = mapped_column(Date)

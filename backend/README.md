@@ -81,7 +81,7 @@ From the repo root: `powershell -ExecutionPolicy Bypass -File .\start.ps1`. It s
 | Area | Endpoints |
 |---|---|
 | Library | `POST /api/documents` (multi-file upload), `GET /api/documents` (upload time, status, counts), `GET/PATCH /api/documents/{id}` (edit, `active=false` to disable), `POST /api/documents/{id}/reingest`, `GET /api/documents/{id}/file`, `GET /api/documents/{id}/pages/{n}.png?highlight=sid,sid`, `GET /api/sentences/{id}/preview.png`, `GET /api/jobs/{id}` |
-| Chat | `POST /api/chats`, `GET /api/chats`, `GET /api/chats/{id}` (turns with all versions), `DELETE /api/chats/{id}`, `POST /api/chats/{id}/messages` (SSE by default; `?stream=false` for JSON), `PUT /api/chats/{id}/turns/{turn}` (edit and resend → new version), `POST /api/chats/{id}/turns/{turn}/regenerate` |
+| Chat | `POST /api/chats`, `GET /api/chats`, `GET /api/chats/{id}` (turns with all versions), `DELETE /api/chats/{id}`, `POST /api/chats/{id}/messages` (SSE by default; `?stream=false` for JSON), `PUT /api/chats/{id}/turns/{turn}` (edit and resend → new version, new branch), `POST /api/chats/{id}/turns/{turn}/regenerate`, `POST /api/chats/{id}/turns/{turn}/select {"version"}` (switch version, its follow-ups come back) |
 | Amendments | `GET /api/amendments?status=proposed`, `POST /api/amendments` (manual), `PATCH /api/amendments/{id}` (confirm/reject/edit), `GET /api/documents/{id}/clauses/{ref}/timeline?as_of=` |
 | Alerts | `GET /api/alerts` (side-by-side quotes), `POST /api/alerts/scan`, `DELETE /api/alerts/{id}` |
 | Camera | `POST /api/camera/transcribe` (image → editable text), `POST /api/camera/check-clause` |

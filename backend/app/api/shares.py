@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.render import render_crop
 from app.db import get_session
-from app.models import Chat, Document, Message, Sentence, Share
+from app.models import Chat, Document, Sentence, Share
 from app.security import Principal, get_principal
 from app.storage import get_storage
 
@@ -48,13 +48,11 @@ async def create_share(chat_id: str, body: ShareIn, p: Principal = Depends(get_p
     chat = await session.get(Chat, chat_id)
     if chat is None or (p.kind == "user" and chat.user_id != p.user_id):
         raise HTTPException(404, "chat not found")
-    q = select(Message).where(Message.chat_id == chat_id, Message.status == "done").order_by(Message.turn, Message.version)
-    if body.turn is not None:
-        q = q.where(Message.turn == body.turn)
-    msgs = (await session.execute(q)).scalars().all()
-    latest: dict[int, Message] = {}
-    for m in msgs:
-        latest[m.turn] = m  # latest version of each turn
+    from app.api.chats import _messages, _path  # the branch on screen, not every version ever asked
+
+    path = [m for m in _path(await _messages(session, chat_id), chat.current_message_id)
+            if body.turn is None or m.turn == body.turn]
+    latest = {m.turn: m for m in path if m.status == "done"}
     if not latest:
         raise HTTPException(400, "nothing to share yet")
     answers = [m.answer for m in latest.values()]

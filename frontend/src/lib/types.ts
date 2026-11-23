@@ -137,8 +137,9 @@ export interface Message {
 
 export interface Turn {
   turn: number
-  versions: Message[]
+  versions: Message[] // this turn's versions (siblings on the branch on screen), oldest first
   latest: number
+  active?: number // the version on screen; the turns after it are the ones asked after that version
 }
 
 export interface ChatSummary {

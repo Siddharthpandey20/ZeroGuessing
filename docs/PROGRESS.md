@@ -53,7 +53,7 @@ Plan: `docs/RESEARCH_AND_PLAN.md`, Section L (current). Backend docs: `backend/R
 - **2026-11-23:** An amendment's `new_text` must appear (fuzzy ≥90) in the source clause, otherwise the verbatim clause text is stored.
 - **2026-11-23:** Amendments auto-confirm at confidence ≥0.8 with a resolved target document; otherwise `proposed` until a person confirms them.
 - **2026-11-23:** Faithfulness counts `supported` + `conflicted` claims as backed by a quote, over all draft claims.
-- **2026-11-23:** ~~Edit and resend keeps later turns.~~ Changed: editing or re-running a question removes every later turn (like ChatGPT); the edited turn keeps its earlier versions.
+- **2026-11-23:** Edit and resend is ChatGPT-style branching: messages have `parent_id`, the chat a `current_message_id`; editing or re-running turn N adds a sibling version and the later turns leave the screen, and the `< 1 of 2 >` switcher (`POST /chats/{id}/turns/{n}/select`) brings back each version with its own follow-ups. Shares and follow-up context use the branch on screen. Additive migration in `init_db`.
 - **2026-11-23:** Interrupted or failed ingests are resumed on startup and re-read when the same PDF is uploaded again; amendments whose target was uploaded later are linked when it arrives (upload order no longer matters).
 - **2026-11-23:** `.env` may live at the repo root or in `backend/`; `STORAGE_DIR` is relative to `backend/`; compose project pinned to `zeroguess` with `restart: unless-stopped`. `start.ps1` brings everything up after a reboot.
 - **2026-11-23:** HTML share export is at `/public/shares/{token}/html` (avoids a route clash).

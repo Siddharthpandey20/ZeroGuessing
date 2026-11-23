@@ -151,20 +151,40 @@ async def test_upload_order_and_failed_reupload(client):
     assert (await c.post(f"/api/chats/{chat}/documents", files=[pdf("kfs.pdf", KFS)])).json()[0]["job_id"] is None
 
 
-async def test_edit_removes_later_turns(client):
-    """Editing (or re-running) question 2 of 4 removes questions 3 and 4, like ChatGPT; turn 2 keeps its versions."""
+async def test_edit_branches_like_chatgpt(client):
+    """Editing question 2 of 4 starts a new branch: turns 3-4 leave the screen; '1 of 2' on turn 2 brings them back,
+    '2 of 2' shows the edited branch with its own follow-ups. Shares and follow-up context use the branch on screen."""
     c = client
     await sign_in(c, "edit@bank.example")
     chat = (await c.post("/api/chats", json={})).json()["id"]
     await c.post(f"/api/chats/{chat}/documents", files=[pdf("master.pdf", MASTER)])
-    for _ in range(4):
-        await ask(c, chat)
+    for i in range(4):
+        await ask(c, chat, q=f"{Q} ({i + 1})")
+    view = lambda d: [(t["turn"], t["active"], len(t["versions"]), t["versions"][t["active"] - 1]["question"][-3:]) for t in d["turns"]]
+
     r = await c.put(f"/api/chats/{chat}/turns/2?stream=false", json={"question": "What are the penal charges on an overdue instalment?"})
     assert r.status_code == 200, r.text
-    turns = (await c.get(f"/api/chats/{chat}")).json()["turns"]
-    assert [t["turn"] for t in turns] == [1, 2] and len(turns[1]["versions"]) == 2, turns
-    assert turns[1]["versions"][-1]["question"].startswith("What are the penal")
-    await ask(c, chat)  # the conversation continues as turn 3
+    d = (await c.get(f"/api/chats/{chat}")).json()
+    assert [(t["turn"], t["active"], len(t["versions"])) for t in d["turns"]] == [(1, 1, 1), (2, 2, 2)], view(d)
+    await ask(c, chat, q=f"{Q} (b3)")  # the edited branch continues as turn 3
+    d = (await c.get(f"/api/chats/{chat}")).json()
+    assert len(d["turns"]) == 3 and d["turns"][2]["versions"][0]["question"].endswith("(b3)")
+
+    # back to version 1 of turn 2: the original turns 3 and 4 come back
+    d = (await c.post(f"/api/chats/{chat}/turns/2/select", json={"version": 1})).json()
+    assert [x[3] for x in view(d)] == ["(1)", "(2)", "(3)", "(4)"], view(d)
+    assert d == (await c.get(f"/api/chats/{chat}")).json()  # the choice is saved
+    share = (await c.post(f"/api/chats/{chat}/shares", json={})).json()
+    snap = (await c.get(f"/public/shares/{share['token']}")).json()
+    assert [t["question"][-3:] for t in snap["turns"]] == ["(1)", "(2)", "(3)", "(4)"]
+    # and forward again to version 2, with its own follow-up
+    d = (await c.post(f"/api/chats/{chat}/turns/2/select", json={"version": 2})).json()
+    assert [x[3] for x in view(d)] == ["(1)", "nt?", "b3)"], view(d)
+    assert (await c.post(f"/api/chats/{chat}/turns/2/select", json={"version": 9})).status_code == 404
+
+    # re-running turn 1 is a new branch too; its old branch stays reachable
     assert (await c.post(f"/api/chats/{chat}/turns/1/regenerate?stream=false")).status_code == 200
-    turns = (await c.get(f"/api/chats/{chat}")).json()["turns"]
-    assert [t["turn"] for t in turns] == [1] and len(turns[0]["versions"]) == 2, turns
+    d = (await c.get(f"/api/chats/{chat}")).json()
+    assert [(t["turn"], t["active"], len(t["versions"])) for t in d["turns"]] == [(1, 2, 2)], view(d)
+    d = (await c.post(f"/api/chats/{chat}/turns/1/select", json={"version": 1})).json()
+    assert len(d["turns"]) == 3, view(d)  # the most recently used branch under version 1

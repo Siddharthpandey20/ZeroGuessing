@@ -339,7 +339,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
 }) {
   const qc = useQueryClient()
   const scroller = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState<Record<number, number>>({})
+  const [switching, setSwitching] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
   const [speaking, setSpeaking] = useState<string | null>(null)
   const spokeFor = useRef<string | null>(null)
@@ -385,24 +385,31 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
   }, [fresh, turns])
   useEffect(() => () => stopSpeaking(), [chatId])
 
-  // Editing or re-running a past question continues the conversation from there: the questions and answers after it
-  // disappear at once (the server deletes them too), like ChatGPT.
+  // Editing or re-running a past question starts a new branch from there, like ChatGPT: the questions and answers
+  // after it leave the screen at once. They are kept with the old version (the < 1 of 2 > switcher brings them back).
   const dropAfter = (turn: number) => {
     void qc.cancelQueries({ queryKey: ['chat', chatId] })
     qc.setQueryData<ChatDetail>(['chat', chatId], (d) => (d ? { ...d, turns: d.turns.filter((x) => x.turn <= turn) } : d))
-    setView((v) => Object.fromEntries(Object.entries(v).filter(([k]) => Number(k) <= turn)))
     onSelect(null)
+  }
+  /** Show another version of a turn together with the follow-ups asked after it. */
+  const switchVersion = async (t: Turn, version: number) => {
+    setSwitching(true)
+    onSelect(null)
+    try {
+      qc.setQueryData<ChatDetail>(['chat', chatId], await post<ChatDetail>(`/api/chats/${chatId}/turns/${t.turn}/select`, { version }))
+    } finally {
+      setSwitching(false)
+    }
   }
   const resend = (t: Turn, question: string, asOf: string, mode: InputMode) => {
     setEditing(null)
     dropAfter(t.turn)
-    void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}`, method: 'PUT', body: { question, as_of: asOf, input_mode: mode }, turn: t.turn, question, asOf },
-      (m) => setView((v) => ({ ...v, [t.turn]: m.version })))
+    void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}`, method: 'PUT', body: { question, as_of: asOf, input_mode: mode }, turn: t.turn, question, asOf })
   }
   const regenerate = (t: Turn, m: Message) => {
     dropAfter(t.turn)
-    void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}/regenerate`, turn: t.turn, question: m.question, asOf: m.as_of },
-      (msg) => setView((v) => ({ ...v, [t.turn]: msg.version })))
+    void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}/regenerate`, turn: t.turn, question: m.question, asOf: m.as_of })
   }
 
   return (
@@ -412,7 +419,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
           {loading && <div className={styles.turnSkel}><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div>}
           {error && <p className={styles.loadError}>This chat could not be loaded. It may have been deleted.</p>}
           {turns.map((t) => {
-            const version = view[t.turn] ?? t.latest
+            const version = t.active ?? t.latest
             const m = t.versions.find((v) => v.version === version) ?? t.versions[t.versions.length - 1]
             const live = pending && pending.turn === t.turn ? pending : null
             return (
@@ -430,9 +437,9 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                         {m.input_mode === 'voice' && <span className={styles.badge}><Mic size={12} aria-hidden="true" /> Spoken</span>}
                         {t.versions.length > 1 && !live && (
                           <span className={styles.versions} aria-label="Versions of this question">
-                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version <= 1} onClick={() => setView((v) => ({ ...v, [t.turn]: version - 1 }))} aria-label="Previous version"><ChevronLeft size={14} /></button>
+                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version <= 1 || switching || busy} onClick={() => void switchVersion(t, version - 1)} aria-label="Previous version"><ChevronLeft size={14} /></button>
                             <span className="tnum">{version} of {t.versions.length}</span>
-                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version >= t.versions.length} onClick={() => setView((v) => ({ ...v, [t.turn]: version + 1 }))} aria-label="Next version"><ChevronRight size={14} /></button>
+                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version >= t.versions.length || switching || busy} onClick={() => void switchVersion(t, version + 1)} aria-label="Next version"><ChevronRight size={14} /></button>
                           </span>
                         )}
                         {!live && (

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -17,7 +17,7 @@ from app.api.documents import UploadResult, store_uploads
 from app.core.answer import answer_question
 from app.db import SessionLocal, get_session
 from app.llm.gemini import get_llm
-from app.models import Chat, ChatDocument, Document, Message
+from app.models import Chat, ChatDocument, Document, Message, _id
 from app.security import Principal, get_principal
 
 router = APIRouter(tags=["chats"])
@@ -127,13 +127,59 @@ async def _chat(session: AsyncSession, chat_id: str, p: Principal | None = None)
 
 @router.get("/chats/{chat_id}")
 async def get_chat(chat_id: str, p: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)):
-    chat = await _chat(session, chat_id, p)
-    msgs = (await session.execute(select(Message).where(Message.chat_id == chat_id).order_by(Message.turn, Message.version))).scalars().all()
-    turns: dict[int, list[dict]] = {}
-    for m in msgs:
-        turns.setdefault(m.turn, []).append(_msg(m))
-    return {"id": chat.id, "title": chat.title,
-            "turns": [{"turn": t, "versions": v, "latest": v[-1]["version"]} for t, v in sorted(turns.items())]}
+    return await _detail(session, await _chat(session, chat_id, p))
+
+
+async def _messages(session: AsyncSession, chat_id: str) -> list[Message]:
+    return list((await session.execute(select(Message).where(Message.chat_id == chat_id)
+                                       .order_by(Message.turn, Message.version))).scalars())
+
+
+def _path(msgs: list[Message], current_id: str | None) -> list[Message]:
+    """The conversation on screen: from the chat's current message up to turn 1."""
+    by_id = {m.id: m for m in msgs}
+    m = by_id.get(current_id) if current_id else None
+    if m is None and msgs:  # no pointer (or it was lost): the newest message
+        m = max(msgs, key=lambda x: (x.turn, x.version))
+    out, seen = [], set()
+    while m is not None and m.id not in seen:
+        seen.add(m.id)
+        out.append(m)
+        m = by_id.get(m.parent_id) if m.parent_id else None
+    return out[::-1]
+
+
+def _siblings(msgs: list[Message], m: Message) -> list[Message]:
+    return sorted((x for x in msgs if x.turn == m.turn and x.parent_id == m.parent_id), key=lambda x: x.version)
+
+
+def _leaf(msgs: list[Message], m: Message) -> Message:
+    """Deepest message under m, following the most recently created child: where that branch was left."""
+    children: dict[str, list[Message]] = {}
+    for x in msgs:
+        if x.parent_id:
+            children.setdefault(x.parent_id, []).append(x)
+    while children.get(m.id):
+        m = max(children[m.id], key=lambda x: x.created_at)
+    return m
+
+
+async def _detail(session: AsyncSession, chat: Chat) -> dict:
+    msgs = await _messages(session, chat.id)
+    turns = []
+    for m in _path(msgs, chat.current_message_id):
+        sib = _siblings(msgs, m)
+        # `latest` is the version on screen (kept under its old name for older clients)
+        turns.append({"turn": m.turn, "versions": [_msg(x) for x in sib], "latest": m.version, "active": m.version})
+    return {"id": chat.id, "title": chat.title, "turns": turns}
+
+
+async def _on_path(session: AsyncSession, chat: Chat, turn: int) -> tuple[list[Message], Message]:
+    msgs = await _messages(session, chat.id)
+    path = _path(msgs, chat.current_message_id)
+    if not 1 <= turn <= len(path):
+        raise HTTPException(404, "turn not found")
+    return msgs, path[turn - 1]
 
 
 @router.delete("/chats/{chat_id}", status_code=204)
@@ -152,14 +198,18 @@ def _answer_text(a: dict | None) -> str:
     return " ".join(said) or (a.get("abstention") or {}).get("message", "")
 
 
-async def _history(session: AsyncSession, chat_id: str, before_turn: int, keep: int = 3) -> list[dict]:
-    """The latest finished version of each earlier turn, oldest first."""
-    rows = (await session.execute(select(Message).where(Message.chat_id == chat_id, Message.turn < before_turn,
-                                                        Message.status == "done").order_by(Message.turn, Message.version))).scalars()
-    latest: dict[int, Message] = {}
-    for r in rows:
-        latest[r.turn] = r
-    return [{"question": r.question, "answer": _answer_text(r.answer)} for _, r in sorted(latest.items())][-keep:]
+async def _history(session: AsyncSession, m: Message, keep: int = 3) -> list[dict]:
+    """The finished turns this message follows on its own branch, oldest first."""
+    out = []
+    pid = m.parent_id
+    while pid and len(out) < keep:
+        prev = await session.get(Message, pid)
+        if prev is None:
+            break
+        if prev.status == "done":
+            out.append({"question": prev.question, "answer": _answer_text(prev.answer)})
+        pid = prev.parent_id
+    return out[::-1]
 
 
 async def _run(msg_id: str, use_cache: bool = True):
@@ -168,7 +218,7 @@ async def _run(msg_id: str, use_cache: bool = True):
         m = await session.get(Message, msg_id)
         try:
             doc_ids = await _scope(session, await session.get(Chat, m.chat_id))
-            history = await _history(session, m.chat_id, m.turn)
+            history = await _history(session, m)
             async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids, history=history):
                 if ev["type"] == "answer":
                     m.answer, m.status = ev["answer"], "done"
@@ -202,16 +252,12 @@ async def _respond(msg_id: str, stream: bool, use_cache: bool = True):
     return last["message"]
 
 
-async def _drop_after(session: AsyncSession, chat_id: str, turn: int) -> None:
-    """Editing or re-running a past question starts the conversation over from there (as in ChatGPT): every later
-    question and answer, all versions, is removed. Earlier versions of this turn stay, for the version switcher."""
-    await session.execute(delete(Message).where(Message.chat_id == chat_id, Message.turn > turn))
-
-
-async def _new_message(session: AsyncSession, chat: Chat, turn: int, version: int, body: AskIn) -> Message:
-    m = Message(chat_id=chat.id, turn=turn, version=version, question=body.question.strip(),
-                as_of=body.as_of or date.today(), input_mode=body.input_mode)
+async def _new_message(session: AsyncSession, chat: Chat, turn: int, version: int, body: AskIn,
+                       parent_id: str | None = None) -> Message:
+    m = Message(id=_id(), chat_id=chat.id, turn=turn, version=version, question=body.question.strip(),
+                as_of=body.as_of or date.today(), input_mode=body.input_mode, parent_id=parent_id)
     session.add(m)
+    chat.current_message_id = m.id  # the new message's branch is the one on screen
     chat.updated_at = datetime.now(timezone.utc)
     placeholder = None
     if chat.title == "New chat" and turn == 1:
@@ -304,35 +350,53 @@ async def remove_chat_document(chat_id: str, doc_id: str, p: Principal = Depends
 @router.post("/chats/{chat_id}/messages")
 async def ask(chat_id: str, body: AskIn, stream: bool = Query(True), p: Principal = Depends(get_principal),
               session: AsyncSession = Depends(get_session)):
+    """A new question at the end of the conversation on screen."""
     chat = await _chat(session, chat_id, p)
-    last = (await session.execute(select(func.max(Message.turn)).where(Message.chat_id == chat_id))).scalar()
-    m = await _new_message(session, chat, (last or 0) + 1, 1, body)
+    path = _path(await _messages(session, chat_id), chat.current_message_id)
+    last = path[-1] if path else None
+    m = await _new_message(session, chat, (last.turn if last else 0) + 1, 1, body, last.id if last else None)
     return await _respond(m.id, stream)
+
+
+async def _sibling(session: AsyncSession, chat: Chat, turn: int, body: AskIn) -> Message:
+    msgs, cur = await _on_path(session, chat, turn)
+    version = max(x.version for x in _siblings(msgs, cur)) + 1
+    return await _new_message(session, chat, turn, version, body, cur.parent_id)
 
 
 @router.put("/chats/{chat_id}/turns/{turn}")
 async def edit_and_resend(chat_id: str, turn: int, body: AskIn, stream: bool = Query(True),
                           session: AsyncSession = Depends(get_session), p: Principal = Depends(get_principal)):
-    """Edit a past question (and/or its as-of date): creates a new version of that turn (old versions are kept) and
-    removes every turn after it, so the conversation continues from the edited question."""
+    """Edit a past question (and/or its as-of date), like ChatGPT: the new version of that turn starts a new branch, so
+    the turns after it leave the screen. They stay with the old version: switching back to it brings them back."""
     chat = await _chat(session, chat_id, p)
-    v = (await session.execute(select(func.max(Message.version)).where(Message.chat_id == chat_id, Message.turn == turn))).scalar()
-    if v is None:
-        raise HTTPException(404, "turn not found")
-    await _drop_after(session, chat_id, turn)
-    m = await _new_message(session, chat, turn, v + 1, body)
+    m = await _sibling(session, chat, turn, body)
     return await _respond(m.id, stream)
 
 
 @router.post("/chats/{chat_id}/turns/{turn}/regenerate")
 async def regenerate(chat_id: str, turn: int, stream: bool = Query(True), p: Principal = Depends(get_principal),
                      session: AsyncSession = Depends(get_session)):
+    """Run a turn's question again as a new version (a new branch from that point, like an edit)."""
     chat = await _chat(session, chat_id, p)
-    prev = (await session.execute(select(Message).where(Message.chat_id == chat_id, Message.turn == turn)
-                                  .order_by(Message.version.desc()).limit(1))).scalar_one_or_none()
-    if prev is None:
-        raise HTTPException(404, "turn not found")
-    await _drop_after(session, chat_id, turn)
-    m = await _new_message(session, chat, turn, prev.version + 1,
-                           AskIn(question=prev.question, as_of=prev.as_of, input_mode=prev.input_mode))
+    _, prev = await _on_path(session, chat, turn)
+    m = await _sibling(session, chat, turn, AskIn(question=prev.question, as_of=prev.as_of, input_mode=prev.input_mode))
     return await _respond(m.id, stream, use_cache=False)  # regenerate = re-run, bypass the answer cache
+
+
+class SelectIn(BaseModel):
+    version: int = Field(ge=1)
+
+
+@router.post("/chats/{chat_id}/turns/{turn}/select")
+async def select_version(chat_id: str, turn: int, body: SelectIn, p: Principal = Depends(get_principal),
+                         session: AsyncSession = Depends(get_session)):
+    """The version switcher (< 1 of 2 >): show another version of a turn, with the follow-ups that came after it."""
+    chat = await _chat(session, chat_id, p)
+    msgs, cur = await _on_path(session, chat, turn)
+    pick = next((x for x in _siblings(msgs, cur) if x.version == body.version), None)
+    if pick is None:
+        raise HTTPException(404, "version not found")
+    chat.current_message_id = _leaf(msgs, pick).id
+    await session.commit()
+    return await _detail(session, chat)
