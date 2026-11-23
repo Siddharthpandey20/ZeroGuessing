@@ -1,6 +1,10 @@
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Camera, Check, KeyRound, LoaderCircle, Pencil, Trash2 } from 'lucide-react'
+import {
+  BadgeCheck, Briefcase, Building2, CalendarDays, Camera, Check, Circle, Clock, KeyRound, LoaderCircle, LogIn, Mail,
+  Pencil, Sparkles, Trash2, UserRound,
+} from 'lucide-react'
+import { Haze } from '../components/Haze'
 import { api, ApiError, patch, post } from '../lib/api'
 import { tr } from '../lib/i18n'
 import type { User } from '../lib/types'
@@ -38,16 +42,23 @@ export default function ProfilePage() {
 
   return (
     <div className={styles.page}>
+      <div className={styles.backdrop} aria-hidden="true">
+        <Haze className={styles.haze} />
+        <span className={styles.grid} />
+        <span className={styles.glow} />
+      </div>
       <header className={styles.head}>
+        <span className={`readout ${styles.eyebrow}`}><UserRound size={13} strokeWidth={2} aria-hidden="true" /> {tr('Account')}</span>
         <h1 className={styles.h1}>{tr('Your profile')}</h1>
         <p className={styles.sub}>{tr('How you appear in ZeroGuess, and how you sign in.')}</p>
       </header>
 
       {q.isLoading && <div className={`skeleton ${styles.skel}`} />}
       {q.isError && <p className={styles.error} role="alert">{tr('Your profile could not be loaded. Refresh to try again.')}</p>}
+      {q.data && <Overview p={q.data} />}
       {q.data && (
         <div className={styles.cols}>
-          <section className={styles.card} aria-labelledby="about-title">
+          <section className={`${styles.card} ${styles.mainCard}`} aria-labelledby="about-title">
             {editing
               ? <EditDetails p={q.data} onSaved={(p) => { saved(p); setEditing(false) }} onPhoto={saved} onCancel={() => setEditing(false)} />
               : <ViewDetails p={q.data} onEdit={() => setEditing(true)} />}
@@ -58,6 +69,47 @@ export default function ProfilePage() {
         </div>
       )}
     </div>
+  )
+}
+
+/** What a complete profile has; drives the completeness meter and its "still to add" hint. */
+const steps = (p: Profile) => [
+  { done: !!p.name, label: tr('name') },
+  { done: !!p.picture, label: tr('photo') },
+  { done: !!p.job_title, label: tr('job title') },
+  { done: !!p.organisation, label: tr('organisation') },
+  { done: p.has_password || p.google_linked, label: tr('sign-in method') },
+]
+
+const daysSince = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000))
+
+/** Two summary tiles above the cards: completeness and membership. */
+function Overview({ p }: { p: Profile }) {
+  const s = steps(p)
+  const pct = Math.round((s.filter((x) => x.done).length / s.length) * 100)
+  const missing = s.filter((x) => !x.done).map((x) => x.label)
+  const days = daysSince(p.created_at)
+  return (
+    <ul className={styles.stats} aria-label={tr('Profile summary')}>
+      <li className={styles.stat} style={{ '--i': 0 } as React.CSSProperties}>
+        <span className={styles.statIcon} aria-hidden="true"><Sparkles size={16} strokeWidth={1.8} /></span>
+        <span className={styles.statLabel}>{tr('Profile complete')}</span>
+        <span className={`readout ${styles.statValue}`}>{pct}%</span>
+        <span className={styles.meter} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}
+          aria-label={tr('Profile complete')}>
+          <span className={styles.meterFill} style={{ '--w': `${pct}%` } as React.CSSProperties} />
+        </span>
+        <span className={styles.statNote}>
+          {missing.length ? tr('Add your {items} to finish.', { items: missing.join(', ') }) : tr('Everything is filled in.')}
+        </span>
+      </li>
+      <li className={styles.stat} style={{ '--i': 1 } as React.CSSProperties}>
+        <span className={styles.statIcon} aria-hidden="true"><CalendarDays size={16} strokeWidth={1.8} /></span>
+        <span className={styles.statLabel}>{tr('Member for')}</span>
+        <span className={`readout ${styles.statValue}`}>{days} <small>{tr(days === 1 ? 'day' : 'days')}</small></span>
+        <span className={styles.statNote}>{tr('Joined {date}', { date: fmtDate(p.created_at) })}</span>
+      </li>
+    </ul>
   )
 }
 
@@ -72,10 +124,20 @@ function Avatar({ p, size }: { p: Pick<Profile, 'name' | 'email' | 'picture'>; s
 
 function ViewDetails({ p, onEdit }: { p: Profile; onEdit: () => void }) {
   const ways = [p.google_linked && 'Google', p.has_password && tr('Email and password')].filter(Boolean).join(' · ')
+  const facts = [
+    { icon: Mail, k: tr('Email'), v: p.email },
+    { icon: Briefcase, k: tr('Job title'), v: p.job_title },
+    { icon: Building2, k: tr('Organisation'), v: p.organisation },
+    { icon: BadgeCheck, k: tr('Role'), v: tr(p.role === 'admin' ? 'Admin: can upload and confirm' : 'Viewer: can ask and share') },
+    { icon: LogIn, k: tr('Signs in with'), v: ways || '—' },
+    { icon: CalendarDays, k: tr('Member since'), v: fmtDate(p.created_at) },
+    { icon: Clock, k: tr('Last signed in'), v: p.last_login_at ? fmtDateTime(p.last_login_at) : '—' },
+  ]
   return (
     <>
+      <div className={styles.cover} aria-hidden="true"><span /><span /><span /></div>
       <div className={styles.who}>
-        <Avatar p={p} size={96} />
+        <span className={styles.ring}><Avatar p={p} size={104} /></span>
         <div className={styles.whoText}>
           <h2 id="about-title" className={styles.name}>{p.name || p.email.split('@')[0]}</h2>
           {(p.job_title || p.organisation) && (
@@ -88,13 +150,12 @@ function ViewDetails({ p, onEdit }: { p: Profile; onEdit: () => void }) {
         </button>
       </div>
       <dl className={styles.facts}>
-        <div><dt>{tr('Email')}</dt><dd>{p.email}</dd></div>
-        <div><dt>{tr('Job title')}</dt><dd>{p.job_title || <span className={styles.muted}>{tr('Not added')}</span>}</dd></div>
-        <div><dt>{tr('Organisation')}</dt><dd>{p.organisation || <span className={styles.muted}>{tr('Not added')}</span>}</dd></div>
-        <div><dt>{tr('Role')}</dt><dd>{tr(p.role === 'admin' ? 'Admin: can upload and confirm' : 'Viewer: can ask and share')}</dd></div>
-        <div><dt>{tr('Signs in with')}</dt><dd>{ways || '—'}</dd></div>
-        <div><dt>{tr('Member since')}</dt><dd>{fmtDate(p.created_at)}</dd></div>
-        <div><dt>{tr('Last signed in')}</dt><dd>{p.last_login_at ? fmtDateTime(p.last_login_at) : '—'}</dd></div>
+        {facts.map(({ icon: Icon, k, v }, i) => (
+          <div key={k} style={{ '--i': i } as React.CSSProperties}>
+            <dt><span className={styles.factIcon} aria-hidden="true"><Icon size={14} strokeWidth={1.8} /></span>{k}</dt>
+            <dd>{v || <span className={styles.muted}>{tr('Not added')}</span>}</dd>
+          </div>
+        ))}
       </dl>
     </>
   )
@@ -245,9 +306,16 @@ function PasswordCard({ p, onSaved }: { p: Profile; onSaved: (p: Profile) => voi
     }
   }
 
+  const strength = scorePassword(next)
+  const checks = [
+    { ok: p.has_password, label: tr('Password set') },
+    { ok: p.google_linked, label: tr('Google account linked') },
+    { ok: !!p.picture, label: tr('Profile photo added') },
+  ]
   return (
     <>
-      <h2 id="pw-title" className={styles.cardTitle}><KeyRound size={16} strokeWidth={1.8} aria-hidden="true" /> {tr('Password')}</h2>
+      <div className={styles.shield} aria-hidden="true"><KeyRound size={20} strokeWidth={1.8} /></div>
+      <h2 id="pw-title" className={styles.cardTitle}>{tr('Password and security')}</h2>
       <p className={styles.sub}>
         {tr(p.has_password
           ? 'You can sign in with your email and password. Changing it signs you out on your other devices.'
@@ -274,6 +342,12 @@ function PasswordCard({ p, onSaved }: { p: Profile; onSaved: (p: Profile) => voi
             <input className="input" type="password" autoComplete="new-password" maxLength={128} value={next}
               onChange={(e) => setNext(e.target.value)} required aria-describedby="new-pw-hint" />
             <span id="new-pw-hint" className={styles.hint}>{tr('At least 8 characters.')}</span>
+            {next && (
+              <span className={styles.strength} data-level={strength} aria-live="polite">
+                <span className={styles.bars} aria-hidden="true"><i /><i /><i /><i /></span>
+                <span className={styles.strengthText}>{tr(STRENGTH[strength])}</span>
+              </span>
+            )}
           </label>
           <label className="field">
             <span className="field-label">{tr('Confirm password')}</span>
@@ -289,6 +363,27 @@ function PasswordCard({ p, onSaved }: { p: Profile; onSaved: (p: Profile) => voi
           </div>
         </form>
       )}
+      <ul className={styles.checklist} aria-label={tr('Account security')}>
+        {checks.map((c, i) => (
+          <li key={c.label} data-ok={c.ok || undefined} style={{ '--i': i } as React.CSSProperties}>
+            {c.ok
+              ? <Check size={14} strokeWidth={2.4} aria-hidden="true" />
+              : <Circle size={14} strokeWidth={1.8} aria-hidden="true" />}
+            <span>{c.label}</span>
+            <span className="sr-only">{tr(c.ok ? 'done' : 'not done')}</span>
+          </li>
+        ))}
+      </ul>
     </>
   )
+}
+
+const STRENGTH = ['Too short', 'Weak', 'Fair', 'Good', 'Strong'] as const
+
+/** A rough 0–4 strength for the meter: length first, then a mix of character kinds. Advice only; the server decides. */
+function scorePassword(pw: string): 0 | 1 | 2 | 3 | 4 {
+  if (pw.length < 8) return 0
+  const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(pw)).length
+  const score = 1 + (pw.length >= 12 ? 1 : 0) + (kinds >= 3 ? 1 : 0) + (kinds === 4 && pw.length >= 14 ? 1 : 0)
+  return Math.min(4, score) as 1 | 2 | 3 | 4
 }
