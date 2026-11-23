@@ -105,6 +105,10 @@ _CELL_FLAGS = pymupdf.TEXTFLAGS_TEXT & ~pymupdf.TEXT_PRESERVE_LIGATURES  # "ﬁ"
 _SENT_END = re.compile(r"[.;?!](?=\s+[A-Z0-9(“\"‘₹])")
 
 
+# control characters other than tab/newline/CR (NUL in particular can't be stored in a Postgres text column)
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def _is_bold(span: dict) -> bool:
     return bool(span["flags"] & 16) or "bold" in span["font"].lower()
 
@@ -120,6 +124,8 @@ def _page_lines(page: pymupdf.Page, pno: int, table_rects: list[pymupdf.Rect], t
                 sizes.append(span["size"])
                 bold = bold or _is_bold(span)
                 for ch in span["chars"]:
+                    if _CTRL.match(ch["c"]):  # e.g. NUL from odd font encodings: Postgres text rejects 0x00
+                        continue
                     chars.append((ch["c"], tuple(ch["bbox"])))
             text = "".join(c for c, _ in chars)
             if not text.strip():
@@ -235,7 +241,8 @@ def round2(x: float) -> float:
 
 
 def _clean_cell(c: str | None) -> str:
-    c = re.sub(r"(?<=\w)-\s*\n\s*(?=\w)", "-", c or "")  # wrapped "no-" + "dues" -> "no-dues"
+    c = _CTRL.sub("", c or "")
+    c = re.sub(r"(?<=\w)-\s*\n\s*(?=\w)", "-", c)  # wrapped "no-" + "dues" -> "no-dues"
     return re.sub(r"\s+", " ", c).strip()
 
 

@@ -47,6 +47,8 @@
 .navLinks a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 4px; border-radius: 2px; transition: none; }
 .navEnd { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-xs); }
 
+/* the wordmark spans the hero edge to edge; its height is capped (Wordmark maxVh) and it is stretched sideways instead,
+   so on wide, short screens the headline, buttons and card stay above the fold */
 .mark { position: relative; z-index: 1; padding: 0 32px; margin-top: clamp(4px, 1.5vh, 16px); }
 
 .heroGrid {
@@ -63,7 +65,7 @@
 .hero .heroSpecimen[data-held] { opacity: 0; transition: none; }
 .tilt { transform-style: preserve-3d; will-change: transform; }
 
-.h1 { font-size: clamp(2.5rem, 4.6vw + 0.4rem, 5.25rem); font-weight: 560; line-height: 0.96; letter-spacing: -0.045em; color: var(--color-ink); max-width: 11ch; }
+.h1 { font-size: clamp(2.5rem, min(4.6vw + 0.4rem, 8.4svh), 5.25rem); font-weight: 560; line-height: 0.96; letter-spacing: -0.045em; color: var(--color-ink); max-width: 11ch; }
 .h1Word { display: inline-block; overflow: clip; vertical-align: top; padding-bottom: 0.06em; margin-bottom: -0.06em; }
 .h1Word > span { display: inline-block; transform: translateY(105%); transition: transform 1100ms var(--ease-out) var(--d); }
 .h1[data-play] .h1Word > span { transform: none; }

@@ -93,6 +93,18 @@ export const HI: Record<string, string> = {
 
   // turns
   'Versions of this question': 'इस प्रश्न के संस्करण',
+  'Questions in this chat: {n}': 'इस चैट के प्रश्न: {n}',
+  'Jump to a question': 'किसी प्रश्न पर जाएँ',
+  'Attached PDFs': 'जोड़ी गई PDF',
+  'Uploading…': 'अपलोड हो रही है…',
+  'Reading…': 'पढ़ी जा रही है…',
+  'Ready': 'तैयार',
+  'Failed': 'विफल',
+  'Demo documents': 'डेमो दस्तावेज़',
+  'Not a usable PDF': 'यह PDF उपयोग योग्य नहीं है',
+  'Your documents are still being read. You can type now and send once they are ready.': 'आपके दस्तावेज़ अभी पढ़े जा रहे हैं। आप अभी लिख सकते हैं, और तैयार होने पर भेज सकते हैं।',
+  'Wait until the documents are ready': 'दस्तावेज़ तैयार होने तक प्रतीक्षा करें',
+  'Your question is in the box. Send it once the documents are ready.': 'आपका प्रश्न बॉक्स में है। दस्तावेज़ तैयार होने पर इसे भेजें।',
   'Previous version': 'पिछला संस्करण',
   'Next version': 'अगला संस्करण',
   'Edit the question or its date and resend': 'प्रश्न या उसकी तारीख़ बदलकर फिर भेजें',

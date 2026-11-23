@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, AudioLines, Camera, ImageUp, LoaderCircle, Mic, Paperclip, Square } from 'lucide-react'
+import { ArrowUp, AudioLines, Camera, FileText, ImageUp, LoaderCircle, Mic, Paperclip, Square, TriangleAlert, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { canDictate, canSpeak, dictate, stopSpeaking, type SpeechLang } from '../lib/speech'
 import { CameraCapture } from './CameraCapture'
@@ -7,6 +7,14 @@ import styles from './Composer.module.css'
 import { tr } from '../lib/i18n'
 
 export type InputMode = 'typed' | 'camera' | 'voice'
+
+/** A PDF added from this box, shown as a chip above the question until the next question is sent (as in ChatGPT). */
+export interface Attachment {
+  key: string
+  name: string
+  state: 'uploading' | 'working' | 'ready' | 'failed'
+  detail?: string | null
+}
 /** speakReply: read the answer aloud when it arrives (voice conversation only). */
 export interface AskOptions {
   speakReply?: boolean
@@ -29,14 +37,21 @@ interface Props {
   submitLabel?: string
   /** Add PDFs to this chat (paperclip). Omitted where uploading makes no sense, e.g. editing a past question. */
   onAttach?: (files: File[]) => void
+  /** PDFs just added, with their progress; each can be removed again. */
+  attachments?: Attachment[]
+  onRemoveAttachment?: (key: string) => void
+  /** Documents are still being uploaded or read: typing is fine, sending waits until they are ready. */
+  waiting?: boolean
 }
+
+const ATTACH_LABEL: Record<Attachment['state'], string> = { uploading: 'Uploading…', working: 'Reading…', ready: 'Ready', failed: 'Failed' }
 
 /**
  * Question box: the date the rule should be checked on, PDFs for this chat, text from an image or a live photo,
  * dictation into the box (you review and press Ask), and a voice conversation (speak, it asks when you pause and
  * reads the answer aloud).
  */
-export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact, submitLabel, onAttach }: Props) {
+export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact, submitLabel, onAttach, attachments, onRemoveAttachment, waiting }: Props) {
   const [q, setQ] = useState(initial?.question ?? '')
   const [asOf, setAsOf] = useState(initial?.asOf ?? todayISO())
   const [mode, setMode] = useState<InputMode>('typed')
@@ -67,7 +82,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
 
   const send = () => {
     const text = q.trim()
-    if (text.length < 2 || busy) return
+    if (text.length < 2 || busy || waiting) return
     stopRef.current?.()
     onSubmit(text, asOf, mode)
     if (!initial) {
@@ -104,6 +119,10 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
         stopRef.current = null
         const text = heard.current.trim()
         if (kind === 'converse') {
+          if (text.length >= 2 && waiting) {
+            setNote(tr('Your question is in the box. Send it once the documents are ready.')) // never sent before they are
+            return
+          }
           if (text.length >= 2 && !busy) {
             onSubmit(text, asOf, 'voice', { speakReply: canSpeak() })
             setQ('')
@@ -156,6 +175,28 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
         send()
       }}
     >
+      {!!attachments?.length && (
+        <ul className={styles.files} aria-label={tr('Attached PDFs')}>
+          {attachments.map((a) => (
+            <li key={a.key} className={styles.file} data-state={a.state} title={a.state === 'failed' && a.detail ? a.detail : a.name}>
+              <span className={styles.fileIcon} aria-hidden="true">
+                {a.state === 'uploading' || a.state === 'working' ? <LoaderCircle size={15} className={styles.spin} />
+                  : a.state === 'failed' ? <TriangleAlert size={15} strokeWidth={1.8} /> : <FileText size={15} strokeWidth={1.8} />}
+              </span>
+              <span className={styles.fileText}>
+                <span className={styles.fileName}>{a.name}</span>
+                <span className={styles.fileState}>{a.state === 'failed' && a.detail ? a.detail : tr(ATTACH_LABEL[a.state])}</span>
+              </span>
+              {onRemoveAttachment && a.state !== 'uploading' && (
+                <button type="button" className={styles.fileRemove} onClick={() => onRemoveAttachment(a.key)} aria-label={tr('Remove {title} from this chat', { title: a.name })}>
+                  <X size={13} strokeWidth={2} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {waiting && <p className={styles.note} role="status">{tr('Your documents are still being read. You can type now and send once they are ready.')}</p>}
       <label className="sr-only" htmlFor="question">{tr('Question')}</label>
       <textarea
         id="question"
@@ -233,7 +274,8 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
         {onCancel && (
           <button type="button" className="btn btn-quiet btn-sm" onClick={onCancel}>{tr('Cancel')}</button>
         )}
-        <button type="submit" className={`btn btn-primary btn-sm ${styles.send}`} disabled={busy || q.trim().length < 2}>
+        <button type="submit" className={`btn btn-primary btn-sm ${styles.send}`} disabled={busy || waiting || q.trim().length < 2}
+          title={waiting ? tr('Wait until the documents are ready') : undefined}>
           {submitLabel ?? tr('Ask')} <ArrowUp size={15} strokeWidth={2.2} aria-hidden="true" />
         </button>
       </div>

@@ -99,7 +99,8 @@ class GeminiClient:
                 try:
                     resp = await self.client.aio.models.embed_content(
                         model=self.embed_model,
-                        contents=batch,
+                        # one Content per text: gemini-embedding-2 merges a plain list of strings into ONE embedding
+                        contents=[types.Content(parts=[types.Part(text=t)]) for t in batch],
                         config=types.EmbedContentConfig(task_type=task, output_dimensionality=self.dim),
                     )
                     break
@@ -107,6 +108,8 @@ class GeminiClient:
                     if e.code not in _RETRYABLE or attempt == 3:
                         raise LLMError(str(e)) from e
                     await asyncio.sleep(2**attempt)
+            if len(resp.embeddings) != len(batch):  # never hand back fewer vectors than texts: callers zip them
+                raise LLMError(f"embedding model returned {len(resp.embeddings)} vectors for {len(batch)} texts")
             vecs = np.array([e.values for e in resp.embeddings], dtype=np.float32)
             vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-12
             out.extend(vecs.tolist())

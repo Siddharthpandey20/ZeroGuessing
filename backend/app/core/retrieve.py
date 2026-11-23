@@ -60,6 +60,31 @@ def key_terms(q: str) -> list[str]:
     return [t for t in toks if t not in _STOP and len(t) > 1][:16]
 
 
+_SUFFIXES = ("ies", "ing", "es", "ed", "s")
+
+
+def stem(t: str) -> str:
+    """Crude English suffix strip so "conclusions" finds "Conclusion" and "charges" finds "charged". The full-text
+    index uses the 'simple' config (no stemming: Hindi and figures stay verbatim), so we stem the question side and
+    prefix-match. Only plain Latin words of 4+ letters are touched; numbers, clause refs and Hindi pass through."""
+    if not re.fullmatch(r"[a-z]{4,}", t):
+        return t
+    for suf in _SUFFIXES:
+        if t.endswith(suf) and len(t) - len(suf) >= 4:
+            return t[: -len(suf)]
+    return t
+
+
+def tsquery(terms: list[str]) -> str:
+    """OR-query for to_tsquery('simple', ...): stemmed words prefix-match (conclusion:* hits conclusion/conclusions)."""
+    out = []
+    for t in terms:
+        t = re.sub(r"[^\w.]", "", t)
+        if t:
+            out.append(f"{stem(t)}:*" if re.fullmatch(r"[a-z]{4,}", t) else t)
+    return " | ".join(out)
+
+
 def _scoped(q, doc_ids: list[str] | None):
     """Limit a chunk/document query to a chat's documents (None: every active document)."""
     return q if doc_ids is None else q.where(Document.id.in_(doc_ids))
@@ -77,9 +102,7 @@ async def _dense(session: AsyncSession, qvec: list[float], n: int, doc_ids: list
 
 
 async def _fts(session: AsyncSession, terms: list[str], n: int, doc_ids: list[str] | None = None) -> list[tuple[str, float]]:
-    if not terms:
-        return []
-    tsq = " | ".join(re.sub(r"[^\w.]", "", t) for t in terms if re.sub(r"[^\w.]", "", t))
+    tsq = tsquery(terms)
     if not tsq:
         return []
     q = func.to_tsquery("simple", tsq)
@@ -154,6 +177,7 @@ async def _budget(session: AsyncSession, ranked: list[Chunk], terms: list[str], 
     if not all_ids:
         return []
     text = {sid: t.lower() for sid, t in (await session.execute(select(Sentence.id, Sentence.text).where(Sentence.id.in_(all_ids)))).all()}
+    terms = [stem(t) for t in terms]  # "conclusions" must score the sentence that says "Conclusion"
     out: list[str] = []
     seen: set[str] = set()
 

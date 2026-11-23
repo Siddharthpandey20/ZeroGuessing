@@ -58,7 +58,15 @@ Write-Host "Database is up on localhost:5433."
 
 # ---- 3. API and web app
 if (-not $NoBackend) {
-    Start-Process powershell -WorkingDirectory $backend -ArgumentList "-NoExit", "-Command", "uv sync; uv run uvicorn app.main:app --reload --port 8000"
+    # uv cannot delete read-only folders on Windows, so `uv sync` fails with "Access is denied (os error 5)"
+    # when a pulled uv.lock upgrades or removes a package whose files carry the ReadOnly flag. Clear it first.
+    $venv = Join-Path $backend ".venv"
+    if (Test-Path $venv) {
+        Get-ChildItem $venv -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReadOnly } |
+            ForEach-Object { $_.Attributes = $_.Attributes -band -bnot [IO.FileAttributes]::ReadOnly }
+    }
+    Start-Process powershell -WorkingDirectory $backend -ArgumentList "-NoExit", "-Command", "uv sync; uv run uvicorn app.main:app --reload --reload-include .env --port 8000"
     Write-Host "API starting in a new window: http://localhost:8000/docs"
 }
 if (-not $NoFrontend) {

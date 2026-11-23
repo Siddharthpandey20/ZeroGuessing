@@ -9,8 +9,9 @@ import { AnswerView } from './answer/AnswerView'
 import { LiveTrace } from './answer/WorkTrace'
 import { fmtDate, type Selection } from './answer/selection'
 import { ChatDocs, isReady } from './ChatDocs'
-import { Composer, type AskOptions, type InputMode } from './Composer'
+import { Composer, type AskOptions, type Attachment, type InputMode } from './Composer'
 import { Evidence } from './Evidence'
+import { PromptNav, type NavItem } from './PromptNav'
 import { ShareDialog } from './ShareDialog'
 import { consumeSpeak, dismissPending, runAnswer, takeFresh, usePending, type Pending } from './askStore'
 import styles from './Ask.module.css'
@@ -52,6 +53,25 @@ export default function Ask() {
   const docs = chatId ? chatDocs.data ?? [] : []
   const ready = docs.filter(isReady).length
 
+  // PDFs added from the question box: chips in the box until the next question is sent (as in ChatGPT)
+  const [attached, setAttached] = useState<{ key: string; name: string; docId?: string; error?: string | null }[]>([])
+  const shownChat = useRef(chatId)
+  useEffect(() => {
+    // a brand-new chat is created by its first upload: keep those chips when the address changes to it
+    if (shownChat.current) setAttached([])
+    shownChat.current = chatId
+  }, [chatId])
+  const attachments: Attachment[] = attached.map((a) => {
+    if (a.error !== undefined) return { key: a.key, name: a.name, state: 'failed', detail: a.error }
+    if (!a.docId) return { key: a.key, name: a.name, state: 'uploading' }
+    const d = docs.find((x) => x.id === a.docId)
+    if (!d) return { key: a.key, name: a.name, state: 'working' }
+    if (d.ingest_status === 'failed') return { key: a.key, name: a.name, state: 'failed', detail: d.ingest_error }
+    return { key: a.key, name: a.name, state: isReady(d) ? 'ready' : 'working' }
+  })
+  // nothing is sent while any document of this chat is still being uploaded or read
+  const waiting = uploading || docs.some((d) => !isReady(d) && d.ingest_status !== 'failed')
+
   useEffect(() => setSelection(null), [chatId])
   useEffect(() => setNotes([]), [chatId])
 
@@ -79,17 +99,21 @@ export default function Ask() {
   const ask = useCallback(
     async (question: string, asOf: string, mode: InputMode, opts?: AskOptions) => {
       const id = await ensureChat()
+      setAttached([]) // the chips belong to this question; the documents stay in the chat
       void runAnswer(qc, { chatId: id, path: `/api/chats/${id}/messages`, body: { question, as_of: asOf, input_mode: mode }, turn: null, question, asOf, speakReply: opts?.speakReply })
     },
     [ensureChat, qc],
   )
 
-  /** Upload PDFs into this chat (or the demo set when `files` is omitted) and show them in the sidebar. */
+  /** Upload PDFs into this chat (or the demo set when `files` is omitted); they show as chips in the question box. */
   const addDocs = useCallback(
     async (files?: File[]) => {
       setUploading(true)
       setNotes([])
-      setDocsOpen(true)
+      const batch = `${Date.now()}`
+      const holders = (files ? files.map((f) => f.name) : [tr('Demo documents')]).map((name, i) => ({ key: `${batch}-${i}`, name }))
+      setAttached((l) => [...l, ...holders])
+      const settle = (next: typeof attached) => setAttached((l) => [...l.filter((a) => !holders.some((h) => h.key === a.key)), ...next])
       try {
         const id = await ensureChat()
         let res: UploadResult[]
@@ -102,8 +126,13 @@ export default function Ask() {
         }
         setNotes(res.filter((r) => r.status === 'rejected').map((r) => `${r.filename} was not added: ${r.detail ?? 'not a usable PDF'}.`))
         await Promise.all([qc.invalidateQueries({ queryKey: ['chat-docs', id] }), qc.invalidateQueries({ queryKey: ['documents'] })])
+        settle(res.map((r, i) => r.status === 'rejected' || !r.document_id
+          ? { key: `${batch}-r${i}`, name: r.filename, error: r.detail ?? tr('Not a usable PDF') }
+          : { key: r.document_id, name: r.filename, docId: r.document_id }))
       } catch (e) {
-        setNotes([e instanceof ApiError ? e.message : tr('The upload failed. Check your connection and try again.')])
+        const msg = e instanceof ApiError ? e.message : tr('The upload failed. Check your connection and try again.')
+        setNotes([msg])
+        settle(holders.map((h) => ({ ...h, error: msg })))
       } finally {
         setUploading(false)
       }
@@ -123,6 +152,17 @@ export default function Ask() {
     },
     [chatId, qc],
   )
+
+  /** The ✕ on a chip: take that PDF out of this chat again (a failed one just goes away). */
+  const removeAttachment = useCallback(
+    (key: string) => {
+      const a = attached.find((x) => x.key === key)
+      setAttached((l) => l.filter((x) => x.key !== key))
+      if (a?.docId) void removeDoc(a.docId)
+    },
+    [attached, removeDoc],
+  )
+  const attach = { attachments, onRemoveAttachment: removeAttachment, waiting }
 
   const closeDocs = useCallback(() => setDocsOpen(false), [])
   const busy = !!pending && !pending.error
@@ -159,7 +199,7 @@ export default function Ask() {
 
         {showEmpty ? (
           <EmptyChat onAsk={ask} onAttach={addDocs} onDemo={() => addDocs()} onOpenDocs={() => setDocsOpen(true)}
-            total={docs.length} ready={ready} loading={!!chatId && chatDocs.isLoading} uploading={uploading} />
+            total={docs.length} ready={ready} loading={!!chatId && chatDocs.isLoading} uploading={uploading} attach={attach} />
         ) : (
           <Thread
             chatId={chatId!}
@@ -173,6 +213,7 @@ export default function Ask() {
             onAsk={ask}
             onAttach={addDocs}
             busy={busy}
+            attach={attach}
           />
         )}
       </section>
@@ -279,9 +320,12 @@ function ChatRail({ chats, loading, activeId, onPick, onDelete }: {
   )
 }
 
-function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading, uploading }: {
+/** What the question box shows about PDFs just added, and whether it may send yet. */
+interface AttachState { attachments: Attachment[]; onRemoveAttachment: (key: string) => void; waiting: boolean }
+
+function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading, uploading, attach }: {
   onAsk: (q: string, a: string, m: InputMode, o?: AskOptions) => void; onAttach: (files: File[]) => void; onDemo: () => void; onOpenDocs: () => void
-  total: number; ready: number; loading: boolean; uploading: boolean
+  total: number; ready: number; loading: boolean; uploading: boolean; attach: AttachState
 }) {
   const [seed, setSeed] = useState<string | null>(null)
   const picker = useRef<HTMLInputElement>(null)
@@ -327,16 +371,16 @@ function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading,
         )}
       </div>
       <div className={styles.dock}>
-        <Composer key={seed ?? 'blank'} initial={seed ? { question: seed, asOf: new Date().toISOString().slice(0, 10) } : undefined} onSubmit={onAsk} onAttach={onAttach} autoFocus />
+        <Composer key={seed ?? 'blank'} initial={seed ? { question: seed, asOf: new Date().toISOString().slice(0, 10) } : undefined} onSubmit={onAsk} onAttach={onAttach} autoFocus {...attach} />
       </div>
     </div>
   )
 }
 
-function Thread({ chatId, detail, loading, error, pending, selection, onSelect, onShare, onAsk, onAttach, busy }: {
+function Thread({ chatId, detail, loading, error, pending, selection, onSelect, onShare, onAsk, onAttach, busy, attach }: {
   chatId: string; detail?: ChatDetail; loading: boolean; error: boolean; pending: Pending | null; selection: Selection
   onSelect: (s: Selection) => void; onShare: (turn: number) => void; onAsk: (q: string, a: string, m: InputMode, o?: AskOptions) => void
-  onAttach: (files: File[]) => void; busy: boolean
+  onAttach: (files: File[]) => void; busy: boolean; attach: AttachState
 }) {
   const qc = useQueryClient()
   const scroller = useRef<HTMLDivElement>(null)
@@ -413,8 +457,18 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
     void runAnswer(qc, { chatId, path: `/api/chats/${chatId}/turns/${t.turn}/regenerate`, turn: t.turn, question: m.question, asOf: m.as_of })
   }
 
+  // the jump list shows the question of the version on screen (or the one being re-asked)
+  const navItems: NavItem[] = turns.map((t) => {
+    const v = t.active ?? t.latest
+    const m = t.versions.find((x) => x.version === v) ?? t.versions[t.versions.length - 1]
+    return { key: String(t.turn), question: pending && pending.turn === t.turn ? pending.question : m.question }
+  })
+  if (pending && pending.turn === null) navItems.push({ key: 'pending', question: pending.question })
+
   return (
     <>
+      <div className={styles.scrollWrap}>
+      <PromptNav items={navItems} scroller={scroller} />
       <div className={styles.scroll} ref={scroller}>
         <div className={styles.turns}>
           {loading && <div className={styles.turnSkel}><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div>}
@@ -424,7 +478,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
             const m = t.versions.find((v) => v.version === version) ?? t.versions[t.versions.length - 1]
             const live = pending && pending.turn === t.turn ? pending : null
             return (
-              <article key={t.turn} className={styles.turn}>
+              <article key={t.turn} className={styles.turn} data-turn={t.turn}>
                 <header className={styles.qRow}>
                   {editing === t.turn ? (
                     <div className={styles.editBox}>
@@ -484,7 +538,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
           })}
 
           {pending && pending.turn === null && (
-            <article key="pending" className={`${styles.turn} ${styles.arrive}`}>
+            <article key="pending" className={`${styles.turn} ${styles.arrive}`} data-turn="pending">
               <header className={styles.qRow}><p className={styles.question}>{pending.question}</p></header>
               <div className={styles.sheet}>
                 {pending.error ? <StreamError p={pending} chatId={chatId} /> : <LiveTrace steps={pending.trace} stage={pending.stage} info={pending.info} startedAt={pending.startedAt} />}
@@ -493,8 +547,9 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
           )}
         </div>
       </div>
+      </div>
       <div className={styles.dock}>
-        <Composer onSubmit={onAsk} onAttach={onAttach} busy={busy} />
+        <Composer onSubmit={onAsk} onAttach={onAttach} busy={busy} {...attach} />
       </div>
     </>
   )

@@ -114,7 +114,7 @@ export default function Landing() {
           </nav>
 
           <div ref={markRef} className={styles.mark}>
-            <Wordmark play={play} />
+            <Wordmark play={play} maxVh={24} />
           </div>
 
           <div className={styles.heroGrid}>

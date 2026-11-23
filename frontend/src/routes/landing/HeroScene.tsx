@@ -12,6 +12,10 @@ const HOLD_MS = 2400 // the big scene holds this long after the intro
 const SHRINK_MS = 1700 // keep in step with .scene's transform transition
 const GROW_MS = 1150 // the chat card growing out of the screen
 const EASE = 'cubic-bezier(0.65, 0, 0.25, 1)'
+const DESK = 420 / VB.h // the desk's top edge in the drawing, as a share of its height
+const WIDE_PX = 1152 // 72rem: below this the card drops under the headline (see Landing.module.css)
+const CARD_ABOVE_DESK = 10, CARD_BELOW_MARK = 16, MIN_ZOOM = 0.62
+const LINK_TUCK = 3 // the dotted lines end this far under the card's edge, so no sliver of gap shows while it tilts
 
 interface Anchors {
   hero: RefObject<HTMLElement | null>
@@ -54,10 +58,13 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     const textRight = Math.max(...[...copy.children].map((c) => textRect(c)?.right ?? 0))
     const act = textRect(actions)!
     const S = spec.getBoundingClientRect()
-    if (!revealed.current) setCardW(Math.round(spec.offsetWidth) || 520)
     const gap = S.left - textRight
     let width: number, left: number
+    // beside the headline the scene stands on the copy's last line (the proof list), so its desk is low enough for
+    // the card above it; on narrow screens it stands level with the buttons
+    let floor = act.bottom
     if (window.innerWidth > 768 && gap >= 170) {
+      floor = copy.getBoundingClientRect().bottom
       width = Math.min(gap - 48, 320)
       left = textRight + (gap - width) / 2 - H.left
     } else {
@@ -66,13 +73,38 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
       left = avail >= 110 ? act.right + (avail - width) / 2 - H.left : H.width - width - 16
     }
     const height = width * (VB.h / VB.w)
-    const top = act.bottom - H.top - height
+    const top = floor - H.top - height
     setBox({ left, top, width })
+    const markBottom = anchors.mark?.current?.getBoundingClientRect().bottom ?? H.top + H.height * 0.35
+
+    // Card beside the headline: its bottom edge sits just above the desk in the drawing, and if it is too tall for the
+    // space between the wordmark and the desk it is zoomed down (zoom reflows it, so the text stays crisp).
+    const inner = spec.firstElementChild as HTMLElement | null
+    const grid = spec.parentElement
+    let z = 1
+    if (inner && grid) {
+      inner.style.zoom = ''
+      spec.style.translate = ''
+      if (window.innerWidth > WIDE_PX && gap >= 170) {
+        const deskY = top + height * DESK - CARD_ABOVE_DESK
+        const room = deskY - (markBottom - H.top + CARD_BELOW_MARK)
+        z = Math.max(MIN_ZOOM, Math.min(1, room / inner.offsetHeight))
+        if (z < 1) inner.style.zoom = String(z)
+        // read where the card ends only now: at full size a tall card can stretch the grid, which moves its bottom
+        const G = grid.getBoundingClientRect()
+        const base = G.bottom - parseFloat(getComputedStyle(grid).paddingBottom) - H.top
+        // `translate`, not a margin: a margin would grow the grid row and push the headline down. It is also separate
+        // from `transform`, which the grow-out animation owns.
+        spec.style.translate = `0 ${-Math.max(0, base - deskY)}px`
+      } else {
+        spec.style.translate = ''
+      }
+    }
+    if (!revealed.current) setCardW(Math.round(spec.offsetWidth / z) || 520) // the miniature is laid out like the card
 
     // the opening: as large as the free space allows, never over text. While the answer card is still hidden that
     // space is right of the headline and below the wordmark (on phones: below the buttons, within the first screen).
     const wide = window.innerWidth > 768
-    const markBottom = anchors.mark?.current?.getBoundingClientRect().bottom ?? H.top + H.height * 0.35
     const free = wide
       ? { l: textRight + 32, r: H.right - 32, t: markBottom + 40, b: H.bottom - 28 } // +40: the "g" hangs below its box
       : { l: H.left + 12, r: H.right - 12, t: act.bottom + 20, b: Math.min(H.bottom, window.innerHeight) - 16 }
@@ -106,14 +138,20 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
   const drawLinks = useCallback(() => {
     const svg = linksRef.current, hero = anchors.hero.current, spec = anchors.spec.current, screen = screenRef.current
     if (!svg || !hero || !spec || !screen) return
-    const H = hero.getBoundingClientRect(), S = screen.getBoundingClientRect(), R = spec.getBoundingClientRect()
-    const scale = spec.offsetWidth ? R.width / spec.offsetWidth : 1
+    const H = hero.getBoundingClientRect(), S = screen.getBoundingClientRect(), W = spec.getBoundingClientRect()
+    // aim at the card itself (it tilts toward the pointer and may be zoomed), not at its wrapper's square box
+    const fig = spec.querySelector('figure')
+    const R = fig?.getBoundingClientRect() ?? W
+    const scale = spec.offsetWidth ? W.width / spec.offsetWidth : 1 // the grow-out transform, while it plays
+    const zoom = parseFloat((spec.firstElementChild as HTMLElement | null)?.style.zoom || '1') || 1
+    // the card's corners are rounded: end the lines where its edge is straight, or a gap shows at the corner
+    const rad = (fig ? parseFloat(getComputedStyle(fig).borderTopLeftRadius) || 0 : 0) * zoom * scale
     const crop = /inset\(\s*-?[\d.]+px\s+-?[\d.]+px\s+(-?[\d.]+)px/.exec(getComputedStyle(spec).clipPath)
-    const bottom = R.bottom - (crop ? Math.max(0, parseFloat(crop[1])) * scale : 0)
+    const bottom = Math.min(R.bottom, W.bottom - (crop ? Math.max(0, parseFloat(crop[1])) * scale : 0))
     const beside = R.left >= S.right - 2
     const pairs = beside
-      ? [[S.right, S.top, R.left, R.top], [S.right, S.bottom, R.left, bottom]]
-      : [[S.left, S.bottom, R.left, R.top], [S.right, S.bottom, R.right, R.top]]
+      ? [[S.right, S.top, R.left + LINK_TUCK, R.top + rad], [S.right, S.bottom, R.left + LINK_TUCK, Math.max(R.top + rad, bottom - rad)]]
+      : [[S.left, S.bottom, R.left + rad, R.top + LINK_TUCK], [S.right, S.bottom, R.right - rad, R.top + LINK_TUCK]]
     svg.querySelectorAll('line').forEach((l, i) => {
       const [x1, y1, x2, y2] = pairs[i]
       l.setAttribute('x1', String(x1 - H.left)); l.setAttribute('y1', String(y1 - H.top))
@@ -176,11 +214,24 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     }
     window.addEventListener('resize', onResize)
     void document.fonts?.ready.then(() => requestAnimationFrame(drawLinks))
+    // the card tilts toward the pointer and replays its questions on a loop: the lines follow it every frame, but only
+    // while the hero is on screen and the tab is visible
+    let raf = 0, onScreen = true
+    const hero = anchors.hero.current
+    const io = hero ? new IntersectionObserver(([e]) => (onScreen = e.isIntersecting)) : null
+    if (hero) io?.observe(hero)
+    const follow = () => {
+      if (onScreen && !document.hidden) drawLinks()
+      raf = requestAnimationFrame(follow)
+    }
+    raf = requestAnimationFrame(follow)
     return () => {
       window.removeEventListener('resize', onResize)
       clearTimeout(t)
+      cancelAnimationFrame(raf)
+      io?.disconnect()
     }
-  }, [linked, drawLinks])
+  }, [linked, drawLinks, anchors])
 
   useEffect(() => {
     if (!play || settledRef.current) return
