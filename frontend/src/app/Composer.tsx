@@ -266,7 +266,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
                 if (files.length) onAttach(files)
                 e.target.value = ''
               }} />
-            <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => pdfs.current?.click()} aria-label={tr('Add PDFs to this chat')} title={tr('Add PDFs to this chat')}>
+            <button type="button" data-tour="upload" className="btn btn-quiet btn-icon btn-sm" onClick={() => pdfs.current?.click()} aria-label={tr('Add PDFs to this chat')} title={tr('Add PDFs to this chat')}>
               <Paperclip size={16} strokeWidth={1.8} />
             </button>
           </>
@@ -275,11 +275,11 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
         {/* text from an image: pick a saved one, or take a live photo */}
         <input ref={imagePick} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pickImage} />
         <input ref={photoCapture} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" hidden onChange={pickImage} />
-        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => imagePick.current?.click()} disabled={reading}
+        <button type="button" data-tour="image" className="btn btn-quiet btn-icon btn-sm" onClick={() => imagePick.current?.click()} disabled={reading}
           aria-label={tr('Upload an image of a question or clause')} title={tr('Upload an image')}>
           {reading ? <LoaderCircle size={16} className={styles.spin} /> : <ImageUp size={16} strokeWidth={1.8} />}
         </button>
-        <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={reading}
+        <button type="button" data-tour="camera" className="btn btn-quiet btn-icon btn-sm" disabled={reading}
           onClick={() => (canUseCamera() ? setCamera(true) : photoCapture.current?.click())}
           aria-label={tr('Take a photo of a question or clause')} title={tr('Take a photo')}>
           <Camera size={16} strokeWidth={1.8} />
@@ -287,17 +287,17 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
 
         {mic && (
           <span className={styles.mic}>
-            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn}`} onClick={() => listen('dictate')}
+            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn}`} data-tour="mic" onClick={() => listen('dictate')}
               data-on={listening === 'dictate' || undefined} disabled={listening === 'converse'}
               aria-pressed={listening === 'dictate'} aria-label={tr(listening === 'dictate' ? 'Stop dictation' : 'Dictate your question into the box')} title={tr(listening === 'dictate' ? 'Stop' : 'Dictate')}>
               {listening === 'dictate' ? <Square size={13} strokeWidth={2.4} /> : <Mic size={16} strokeWidth={1.8} />}
             </button>
-            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn} ${styles.converse}`} onClick={() => listen('converse')}
+            <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.micBtn} ${styles.converse}`} data-tour="voice" onClick={() => listen('converse')}
               data-on={listening === 'converse' || undefined} disabled={busy || listening === 'dictate'}
               aria-pressed={listening === 'converse'} aria-label={tr(listening === 'converse' ? 'Stop listening' : 'Voice conversation: speak, and hear the answer')} title={listening === 'converse' ? tr('Stop') : tr('Speak and hear the answer')}>
               {listening === 'converse' ? <Square size={13} strokeWidth={2.4} /> : <AudioLines size={16} strokeWidth={1.8} />}
             </button>
-            <span className={styles.langWrap} ref={langWrap}>
+            <span className={styles.langWrap} ref={langWrap} data-tour="answer-lang">
               <button type="button" className={styles.lang} onClick={() => setLangOpen((o) => !o)} disabled={!!listening}
                 lang={lang === 'en' ? undefined : 'hi'} aria-haspopup="menu" aria-expanded={langOpen}
                 aria-label={tr('Voice and answer language: {name}. Change', { name: VOICE_NAME[lang] })}
@@ -332,7 +332,7 @@ export function Composer({ onSubmit, busy, initial, onCancel, autoFocus, compact
             {tr('Stop')} <Square size={12} strokeWidth={2.6} aria-hidden="true" />
           </button>
         ) : (
-          <button type="submit" className={`btn btn-primary btn-sm ${styles.send}`} disabled={busy || waiting || q.trim().length < 2}
+          <button type="submit" data-tour="ask" className={`btn btn-primary btn-sm ${styles.send}`} disabled={busy || waiting || q.trim().length < 2}
             title={waiting ? tr('Wait until the documents are ready') : undefined}>
             {submitLabel ?? tr('Ask')} <ArrowUp size={15} strokeWidth={2.2} aria-hidden="true" />
           </button>

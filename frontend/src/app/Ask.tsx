@@ -267,8 +267,8 @@ export default function Ask() {
             <span>{tr('Drop PDFs to add them to this chat')}</span>
           </div>
         )}
-        <div className={styles.threadTop}>
-          <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.railToggle}`} onClick={() => setRailOpen((o) => !o)} aria-label={tr('Show chats')}>
+        <div className={styles.threadTop} data-tour="chat-bar">
+          <button type="button" data-tour="rail-toggle" className={`btn btn-quiet btn-icon btn-sm ${styles.railToggle}`} onClick={() => setRailOpen((o) => !o)} aria-label={tr('Show chats')}>
             <PanelLeft size={16} strokeWidth={1.8} />
           </button>
           <ChatName chatId={chatId} title={chat.data?.title} />
@@ -279,7 +279,7 @@ export default function Ask() {
             <span className={`${styles.docsCount} tnum`} data-empty={docs.length === 0 || undefined}>{docs.length}</span>
           </button>
           {chatId && !!chat.data?.turns.length && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareFor({})} aria-label={tr('Share this chat')}>
+            <button type="button" className="btn btn-ghost btn-sm" data-tour="share" onClick={() => setShareFor({})} aria-label={tr('Share this chat')}>
               <Share2 size={14} strokeWidth={1.8} aria-hidden="true" /> <span className={styles.docsLabel}>{tr('Share')}</span>
             </button>
           )}
@@ -325,7 +325,7 @@ function ChatName({ chatId, title }: { chatId?: string; title?: string }) {
   const [value, setValue] = useState('')
   const [error, setError] = useState(false)
 
-  if (!chatId) return <h1 className={styles.chatTitle}>{tr('New chat')}</h1>
+  if (!chatId) return <h1 className={styles.chatTitle} data-tour="chat-name">{tr('New chat')}</h1>
 
   const save = async () => {
     const t = value.trim().replace(/\s+/g, ' ').slice(0, 60)
@@ -360,9 +360,9 @@ function ChatName({ chatId, title }: { chatId?: string; title?: string }) {
         }} />
     )
   return (
-    <div className={styles.titleRow}>
+    <div className={styles.titleRow} data-tour="chat-name">
       <h1 className={styles.chatTitle} onDoubleClick={() => { setValue(title ?? ''); setEditing(true) }}>{title ?? ' '}</h1>
-      <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.rename}`} onClick={() => { setValue(title ?? ''); setEditing(true) }} aria-label={tr('Rename this chat')} title={tr('Rename')}>
+      <button type="button" data-tour="rename" className={`btn btn-quiet btn-icon btn-sm ${styles.rename}`} onClick={() => { setValue(title ?? ''); setEditing(true) }} aria-label={tr('Rename this chat')} title={tr('Rename')}>
         <Pencil size={13} strokeWidth={1.8} />
       </button>
       {error && <span className={styles.renameErr} role="alert">{tr('Not saved')}</span>}
@@ -376,7 +376,7 @@ function ChatRail({ chats, loading, activeId, onPick, onDelete }: {
   const [confirm, setConfirm] = useState<string | null>(null)
   return (
     <nav className={styles.rail} aria-label={tr('Your chats')}>
-      <Link to="/app" className="btn btn-ink btn-sm" onClick={onPick}>
+      <Link to="/app" data-tour="new-chat" className="btn btn-ink btn-sm" onClick={onPick}>
         <Plus size={15} strokeWidth={2} aria-hidden="true" /> {tr('New chat')}
       </Link>
       <div className={styles.railList}>
@@ -434,7 +434,7 @@ function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading,
                 e.target.value = ''
               }} />
             <div className={styles.startActions}>
-              <button type="button" className="btn btn-ink" onClick={() => picker.current?.click()} disabled={uploading}>
+              <button type="button" data-tour="upload-empty" className="btn btn-ink" onClick={() => picker.current?.click()} disabled={uploading}>
                 <Upload size={15} strokeWidth={1.8} aria-hidden="true" /> {tr('Upload PDFs')}
               </button>
               <button type="button" className="btn btn-ghost" onClick={onDemo} disabled={uploading}>

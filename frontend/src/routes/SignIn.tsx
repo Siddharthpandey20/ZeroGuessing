@@ -11,6 +11,8 @@ import { tr } from '../lib/i18n'
 interface AuthConfig {
   google_client_id: string | null
   password_login: boolean
+  /** anyone may create an email/password account (older servers omit it: treated as off) */
+  signup?: boolean
 }
 interface TokenOut {
   user: User
@@ -65,6 +67,9 @@ export default function SignIn() {
   const cfg = useQuery({ queryKey: ['auth-config'], queryFn: () => api<AuthConfig>('/api/auth/config') })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [name, setName] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const gRef = useRef<HTMLDivElement>(null)
@@ -128,18 +133,35 @@ export default function SignIn() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    if (signingUp) {
+      // checked here too, so the common mistakes are explained before anything is sent
+      if (password.length < 8) return setError(tr('Use a password of at least 8 characters.'))
+      if (password !== confirm) return setError(tr('The two passwords do not match.'))
+    }
     setBusy(true)
     try {
-      done((await post<TokenOut>('/api/auth/login', { email, password })).user)
+      const res = signingUp
+        ? await post<TokenOut>('/api/auth/signup', { email: email.trim(), password, name: name.trim() || null })
+        : await post<TokenOut>('/api/auth/login', { email, password })
+      done(res.user)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : tr('Could not sign in. Check your connection.'))
+      setError(err instanceof ApiError ? tr(err.message.replace(/^Value error, /, ''))
+        : tr(signingUp ? 'Could not create the account. Check your connection.' : 'Could not sign in. Check your connection.'))
     } finally {
       setBusy(false)
     }
   }
 
+  const switchMode = (m: 'signin' | 'signup') => {
+    setMode(m)
+    setError(null)
+    setConfirm('')
+  }
+
   const google = cfg.data?.google_client_id
   const password_ok = cfg.data?.password_login ?? true
+  const signupOk = password_ok && !!cfg.data?.signup
+  const signingUp = signupOk && mode === 'signup'
 
   return (
     <div className={styles.page}>
@@ -151,8 +173,10 @@ export default function SignIn() {
 
       <main className={styles.main}>
         <div className={styles.panel}>
-          <h1 className={styles.h1}>{tr('Sign in')}</h1>
-          <p className={styles.sub}>{tr('Use your work account. Documents stay on this deployment.')}</p>
+          <h1 className={styles.h1}>{tr(signingUp ? 'Create your account' : 'Sign in')}</h1>
+          <p className={styles.sub}>{tr(signingUp
+            ? 'Sign up with your email, or use Continue with Google: it creates your account too.'
+            : 'Use your work account. Documents stay on this deployment.')}</p>
 
           {google ? (
             <div className={styles.google} aria-busy={gisState === 'loading' || busy}>
@@ -177,22 +201,45 @@ export default function SignIn() {
               </div>
             )
           )}
-          {password_ok && <div className={styles.or}><span>{tr('or with email')}</span></div>}
+          {password_ok && <div className={styles.or}><span>{tr(signingUp ? 'or sign up with email' : 'or with email')}</span></div>}
 
           {password_ok && (
             <form className={styles.form} onSubmit={submit} noValidate>
+              {signingUp && (
+                <label className="field">
+                  <span className="field-label">{tr('Name')} <span className={styles.optional}>{tr('(optional)')}</span></span>
+                  <input className="input" type="text" autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+                </label>
+              )}
               <label className="field">
                 <span className="field-label">{tr('Email')}</span>
                 <input className="input" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!error || undefined} />
               </label>
               <label className="field">
                 <span className="field-label">{tr('Password')}</span>
-                <input className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={!!error || undefined} />
+                <input className="input" type="password" autoComplete={signingUp ? 'new-password' : 'current-password'} required
+                  minLength={signingUp ? 8 : undefined} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)}
+                  aria-invalid={!!error || undefined} aria-describedby={signingUp ? 'pw-hint' : undefined} />
+                {signingUp && <span id="pw-hint" className={styles.hint}>{tr('At least 8 characters.')}</span>}
               </label>
+              {signingUp && (
+                <label className="field">
+                  <span className="field-label">{tr('Confirm password')}</span>
+                  <input className="input" type="password" autoComplete="new-password" required maxLength={128} value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)} aria-invalid={(!!confirm && confirm !== password) || undefined} />
+                </label>
+              )}
               {error && <p className={styles.error} role="alert">{error}</p>}
-              <button className="btn btn-primary" type="submit" disabled={busy || !email || !password}>
-                {tr(busy ? 'Signing in' : 'Sign in')}
-              </button>
+              <div className={signupOk ? styles.actions : undefined}>
+                <button className="btn btn-primary" type="submit" disabled={busy || !email || !password || (signingUp && !confirm)}>
+                  {signingUp ? tr(busy ? 'Creating account' : 'Create account') : tr(busy ? 'Signing in' : 'Sign in')}
+                </button>
+                {signupOk && (
+                  <button className="btn btn-ghost" type="button" disabled={busy} onClick={() => switchMode(signingUp ? 'signin' : 'signup')}>
+                    {tr(signingUp ? 'Back to sign in' : 'Sign up')}
+                  </button>
+                )}
+              </div>
             </form>
           )}
           {!password_ok && error && <p className={styles.error} role="alert">{error}</p>}

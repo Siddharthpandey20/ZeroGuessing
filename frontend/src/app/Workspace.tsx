@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { LogOut } from 'lucide-react'
+import { Compass, LogOut, UserRound } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { LangSwitch } from '../components/LangSwitch'
 import { useT } from '../lib/i18n'
 import type { Conflict } from '../lib/types'
 import { RouteFallback } from '../components/RouteFallback'
+import { START_TOUR, Tour } from './Tour'
 import styles from './Workspace.module.css'
 
 export default function Workspace() {
@@ -21,6 +22,7 @@ export default function Workspace() {
       <div className={styles.body}>
         <Outlet />
       </div>
+      <Tour userId={user.id} />
     </div>
   )
 }
@@ -28,7 +30,7 @@ export default function Workspace() {
 function TopBar() {
   const alerts = useQuery({ queryKey: ['alerts'], queryFn: () => api<Conflict[]>('/api/alerts') })
   const { pathname } = useLocation()
-  const askOn = !/^\/app\/(library|alerts)/.test(pathname)
+  const askOn = !/^\/app\/(library|alerts|profile)/.test(pathname)
   const t = useT()
 
   return (
@@ -84,6 +86,31 @@ function UserMenu() {
             <span>{user.email}</span>
             <span className={styles.role}>{t(user.role === 'admin' ? 'Admin: can upload and confirm' : 'Viewer: can ask and share')}</span>
           </div>
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuItem}
+            onClick={() => {
+              setOpen(false)
+              nav('/app/profile')
+            }}
+          >
+            <UserRound size={15} strokeWidth={1.8} aria-hidden="true" /> {t('View profile')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuItem}
+            onClick={() => {
+              // the tour shows the Ask page's features: go there first, then start it once the page has drawn
+              setOpen(false)
+              const away = /^\/app\/(library|alerts|profile)/.test(location.pathname)
+              if (away) nav('/app')
+              window.setTimeout(() => window.dispatchEvent(new Event(START_TOUR)), away ? 500 : 50)
+            }}
+          >
+            <Compass size={15} strokeWidth={1.8} aria-hidden="true" /> {t('Take the tour')}
+          </button>
           <button
             type="button"
             role="menuitem"

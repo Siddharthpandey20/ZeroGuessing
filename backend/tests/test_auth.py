@@ -180,3 +180,56 @@ def test_empty_jwt_secret_falls_back_in_dev_and_fails_in_production():
     assert Settings(jwt_secret="", cookie_secure=False).jwt_secret == DEV_JWT_SECRET
     with _pytest.raises(ValidationError, match="JWT_SECRET is empty"):
         Settings(jwt_secret="  ", cookie_secure=True)
+
+
+async def test_signup_creates_viewer_and_signs_in(client):
+    c = client
+    assert (await c.get("/api/auth/config")).json()["signup"] is True
+    r = await c.post("/api/auth/signup", json={"email": "New.User@Bank.example", "password": "long-enough-1", "name": " Asha "})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["user"]["email"] == "new.user@bank.example" and body["user"]["role"] == "viewer"
+    assert body["user"]["name"] == "Asha"
+    assert c.cookies.get("zg_refresh") and c.cookies.get("zg_access")
+    me = await c.get("/api/auth/me", headers=bearer(body["access_token"]))
+    assert me.status_code == 200 and me.json()["email"] == "new.user@bank.example"
+    # the new password works for later sign-ins
+    assert (await c.post("/api/auth/login", json={"email": "new.user@bank.example", "password": "long-enough-1"})).status_code == 200
+
+
+async def test_signup_rejects_duplicates_weak_passwords_and_disallowed_domains(client, monkeypatch):
+    c = client
+    ok = {"email": "dup@bank.example", "password": "long-enough-1"}
+    assert (await c.post("/api/auth/signup", json=ok)).status_code == 201
+    r = await c.post("/api/auth/signup", json={**ok, "password": "another-pass-2"})
+    assert r.status_code == 409 and "sign in" in r.json()["detail"].lower()
+
+    assert (await c.post("/api/auth/signup", json={"email": "short@bank.example", "password": "short"})).status_code == 422
+    assert (await c.post("/api/auth/signup", json={"email": "same@bank.example", "password": "same@bank.example"})).status_code == 422
+    assert (await c.post("/api/auth/signup", json={"email": "not-an-email", "password": "long-enough-1"})).status_code == 422
+
+    s = get_settings()
+    monkeypatch.setattr(s, "allowed_email_domains", "bank.example")
+    assert (await c.post("/api/auth/signup", json={"email": "x@other.example", "password": "long-enough-1"})).status_code == 403
+
+    monkeypatch.setattr(s, "allow_signup", False)
+    assert (await c.get("/api/auth/config")).json()["signup"] is False
+    assert (await c.post("/api/auth/signup", json={"email": "y@bank.example", "password": "long-enough-1"})).status_code == 403
+
+
+async def test_signup_never_grants_admin(client):
+    # boss@bank.example is in ADMIN_EMAILS, but sign-up does not prove the address: it stays a viewer
+    r = await client.post("/api/auth/signup", json={"email": "boss@bank.example", "password": "long-enough-1"})
+    assert r.status_code == 201 and r.json()["user"]["role"] == "viewer"
+    tok = r.json()["access_token"]
+    assert (await client.get("/api/users", headers=bearer(tok))).status_code == 403
+
+
+async def test_google_signin_takes_over_unverified_signup_and_drops_its_password(client):
+    # someone signs up with an address they do not own; the real owner later signs in with Google
+    c = client
+    assert (await c.post("/api/auth/signup", json={"email": "owner@gmail.example", "password": "squatter-pass"})).status_code == 201
+    g = await c.post("/api/auth/google", json={"credential": "x:owner@gmail.example"})
+    assert g.status_code == 200
+    # the squatter's password no longer opens the account
+    assert (await c.post("/api/auth/login", json={"email": "owner@gmail.example", "password": "squatter-pass"})).status_code == 401

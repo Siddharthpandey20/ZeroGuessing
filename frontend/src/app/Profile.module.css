@@ -1,0 +1,50 @@
+/* Profile page: details card (view / edit, photo) and password card, side by side on wide screens. */
+.page { height: 100%; overflow-y: auto; padding: var(--space-xl) var(--space-xl) var(--space-2xl); display: grid; align-content: start; gap: var(--space-xl); }
+.head { max-width: 1040px; width: 100%; margin-inline: auto; }
+.h1 { font-size: var(--text-section); font-weight: 560; letter-spacing: -0.04em; line-height: 1; color: var(--color-ink); }
+.sub { margin-top: var(--space-xs); font-size: var(--text-sm); color: var(--color-ink-2); max-width: 64ch; line-height: 1.5; }
+.skel { height: 360px; border-radius: var(--radius-card); max-width: 1040px; width: 100%; margin-inline: auto; }
+.cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-lg); align-items: start; max-width: 1040px; width: 100%; margin-inline: auto; }
+
+.card { display: grid; gap: var(--space-md); padding: var(--space-lg); background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-card); }
+.cardTitle { display: flex; align-items: center; gap: var(--space-xs); font-size: var(--text-lg); font-weight: 600; letter-spacing: var(--tracking-title); }
+
+.avatar { flex: none; border-radius: var(--radius-pill); object-fit: cover; display: grid; place-items: center; background: var(--color-ink); color: var(--color-paper-2); font-weight: 600; }
+
+/* view */
+.who { display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap; }
+.whoText { display: grid; gap: var(--space-2xs); flex: 1; min-width: 12rem; }
+.name { font-size: var(--text-2xl); font-weight: 600; letter-spacing: var(--tracking-title); line-height: 1.15; overflow-wrap: anywhere; }
+.line { color: var(--color-ink-2); font-size: var(--text-sm); }
+.role { justify-self: start; padding: 2px 10px; border-radius: var(--radius-pill); font-size: var(--text-2xs); font-weight: 600; background: var(--color-ink-a06); color: var(--color-ink-2); }
+.role[data-role="admin"] { background: var(--color-accent); color: var(--color-accent-ink); }
+.editBtn { align-self: flex-start; }
+.facts { display: grid; border-top: var(--rule-hair) solid var(--color-rule); }
+.facts > div { display: grid; grid-template-columns: minmax(8rem, 0.4fr) minmax(0, 1fr); gap: var(--space-md); padding: var(--space-sm) 0; border-bottom: var(--rule-hair) solid var(--color-rule); font-size: var(--text-sm); }
+.facts dt { color: var(--color-muted); }
+.facts dd { color: var(--color-ink); overflow-wrap: anywhere; }
+.muted { color: var(--color-muted); font-weight: 400; }
+
+/* edit */
+.form { display: grid; gap: var(--space-md); }
+.photoRow { display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap; }
+.photoBtn { position: relative; padding: 0; border: 0; background: none; border-radius: var(--radius-pill); cursor: pointer; }
+.photoBtn:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.photoBtn[disabled] { cursor: progress; }
+.photoOverlay { position: absolute; inset: 0; display: grid; place-items: center; border-radius: var(--radius-pill); background: oklch(18% 0.03 224 / 0.45); color: #fff; opacity: 0; transition: opacity var(--dur-short) var(--ease-out); }
+.photoBtn:hover .photoOverlay, .photoBtn:focus-visible .photoOverlay, .photoBtn[disabled] .photoOverlay { opacity: 1; }
+.photoText { display: grid; gap: var(--space-xs); flex: 1; min-width: 14rem; }
+.photoActions { display: flex; gap: var(--space-xs); flex-wrap: wrap; }
+.hint { color: var(--color-muted); font-size: var(--text-xs); line-height: 1.45; }
+.actions { display: flex; justify-content: flex-end; gap: var(--space-xs); padding-top: var(--space-2xs); }
+.error { color: var(--color-blocked); font-size: var(--text-sm); }
+.ok { color: var(--color-success); font-size: var(--text-sm); }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 56rem) {
+  .page { padding: var(--space-lg) var(--space-md) var(--space-xl); }
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } .photoOverlay { transition: none; } }

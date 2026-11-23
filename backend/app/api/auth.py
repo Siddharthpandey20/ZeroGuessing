@@ -8,8 +8,9 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from google.auth import exceptions as g_exceptions
 from google.auth.transport import requests as g_requests
 from google.oauth2 import id_token as g_id_token
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -31,6 +32,19 @@ class GoogleIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+
+
+class SignupIn(BaseModel):
+    email: EmailStr
+    # upper bound: argon2 hashes whatever it is given, and a megabyte "password" is a cheap way to burn CPU
+    password: str = Field(min_length=8, max_length=128)
+    name: str | None = Field(None, max_length=80)
+
+    @model_validator(mode="after")
+    def _not_the_email(self) -> "SignupIn":
+        if self.password.strip().lower() == str(self.email).lower():
+            raise ValueError("choose a password that is not your email address")
+        return self
 
 
 class UserOut(BaseModel):
@@ -102,7 +116,16 @@ async def google_login(body: GoogleIn, response: Response, session: AsyncSession
         session.add(user)
     if not user.active:
         raise HTTPException(403, "account disabled")
-    user.google_sub, user.name, user.picture = info["sub"], info.get("name") or user.name, info.get("picture")
+    if user.google_sub is None and user.password_hash:
+        # First Google sign-in to an account made with a password. Google has just proved who owns this address; a
+        # self-service sign-up never did, so whoever set that password may not be the owner. Drop it: from now on the
+        # account opens with Google (the owner can ask an admin for a password again).
+        user.password_hash = None
+    # a name the user set and a photo they uploaded win over Google's; otherwise keep Google's in step
+    user.google_sub = info["sub"]
+    user.name = user.name or info.get("name")
+    if not user.photo_key:
+        user.picture = info.get("picture")
     if email in s.admin_list:
         user.role = "admin"
     await session.flush()
@@ -116,6 +139,31 @@ async def password_login(body: LoginIn, response: Response, session: AsyncSessio
     user = (await session.execute(select(User).where(User.email == body.email.lower()))).scalar_one_or_none()
     if user is None or not user.active or not check_password(body.password, user.password_hash):
         raise HTTPException(401, "wrong email or password")
+    return await _issue(session, user, response)
+
+
+@router.post("/signup", response_model=TokenOut, status_code=201)
+async def signup(body: SignupIn, response: Response, session: AsyncSession = Depends(get_session)):
+    """Create an email/password account and sign it in. Always a viewer: the address is not verified, so ADMIN_EMAILS
+    does not apply here (an admin gets their role by signing in with Google, which proves the address)."""
+    s = get_settings()
+    if not (s.allow_signup and s.allow_password_login):
+        raise HTTPException(403, "Sign-up is turned off on this server. Ask an admin for an account.")
+    email = str(body.email).lower()
+    if s.domain_list and email.split("@")[-1] not in s.domain_list:
+        raise HTTPException(403, "this email domain is not allowed")
+    existing = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if existing is not None:
+        how = "Continue with Google" if existing.google_sub and not existing.password_hash else "sign in"
+        raise HTTPException(409, f"An account with this email already exists. Please {how} instead.")
+    user = User(email=email, name=(body.name or "").strip() or None, role="viewer", active=True,
+                password_hash=hash_password(body.password))
+    session.add(user)
+    try:
+        await session.flush()
+    except IntegrityError:  # the same address signed up twice at the same moment
+        await session.rollback()
+        raise HTTPException(409, "An account with this email already exists. Please sign in instead.")
     return await _issue(session, user, response)
 
 
@@ -165,7 +213,8 @@ async def me(p: Principal = Depends(get_principal)):
 async def auth_config():
     """Public: what the login page should show."""
     s = get_settings()
-    return {"google_client_id": s.google_client_id or None, "password_login": s.allow_password_login}
+    return {"google_client_id": s.google_client_id or None, "password_login": s.allow_password_login,
+            "signup": s.allow_signup and s.allow_password_login}
 
 
 # ---------------------------------------------------------------- admin: users

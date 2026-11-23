@@ -150,7 +150,10 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
+    picture: Mapped[str | None] = mapped_column(Text, nullable=True)  # Google's photo URL, or our /api/profile/photo/...
+    job_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organisation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_key: Mapped[str | None] = mapped_column(Text, nullable=True)  # storage key of an uploaded profile photo
     role: Mapped[str] = mapped_column(String(16), default="viewer")  # admin|viewer
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_sub: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)

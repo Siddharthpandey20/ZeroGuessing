@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     admin_emails: str = ""  # comma-separated; these users get role=admin on first sign-in
     allowed_email_domains: str = ""  # comma-separated; empty = any verified Google account
     allow_password_login: bool = True
+    # anyone can create an email/password account from the sign-in page (always a viewer; needs allow_password_login).
+    # Emails are not verified, so a sign-up never gets admin, and Google sign-in to the same address clears its password.
+    allow_signup: bool = True
     seed_admin_email: str = ""
     seed_admin_password: str = ""
     cookie_secure: bool = False  # True in production (HTTPS)
