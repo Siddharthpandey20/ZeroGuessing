@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router'
 import Lenis from 'lenis'
 import { ArrowUpRight } from 'lucide-react'
@@ -14,8 +14,7 @@ import { ProofStory } from './landing/ProofStory'
 import { ScrollWords } from './landing/ScrollWords'
 import { SectionPill } from './landing/SectionPill'
 import { Specimen } from './landing/Specimen'
-import heroWebm from '../assets/video/hero-glass.webm'
-import heroMp4 from '../assets/video/hero-glass.mp4'
+import { HeroScene } from './landing/HeroScene'
 import capWebm from '../assets/video/checks-capsules.webm'
 import capMp4 from '../assets/video/checks-capsules.mp4'
 import capPoster from '../assets/video/checks-capsules-poster.webp'
@@ -70,6 +69,11 @@ export default function Landing() {
   const [play, setPlay] = useState(false)
   const onIntroDone = useCallback(() => setPlay(true), [])
   const tilt = useTilt<HTMLDivElement>()
+  const heroRef = useRef<HTMLDivElement>(null)
+  const copyRef = useRef<HTMLDivElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
+  const specRef = useRef<HTMLDivElement>(null)
+  const sceneAnchors = useMemo(() => ({ hero: heroRef, copy: copyRef, actions: actionsRef, spec: specRef }), [])
 
   return (
     <div className={styles.page}>
@@ -80,8 +84,8 @@ export default function Landing() {
 
       {/* ---------- hero: rendered glass video, full-width wordmark, headline, live specimen ---------- */}
       <header className={styles.heroWrap} data-section="Start">
-        <div className={styles.hero} data-play={play || undefined}>
-          <VideoLoop className={styles.video} webm={heroWebm} mp4={heroMp4} poster="/hero-glass-poster.webp" eager />
+        <div ref={heroRef} className={styles.hero} data-play={play || undefined}>
+          <HeroScene play={play} anchors={sceneAnchors} />
           <div className={styles.veil} aria-hidden="true" />
           <span className={`${styles.corner} ${styles.cTL}`} aria-hidden="true" />
           <span className={`${styles.corner} ${styles.cTR}`} aria-hidden="true" />
@@ -107,21 +111,21 @@ export default function Landing() {
           </div>
 
           <div className={styles.heroGrid}>
-            <div className={styles.heroCopy}>
+            <div ref={copyRef} className={styles.heroCopy}>
               <h1 className={styles.h1} data-play={play || undefined}>
                 {'Every answer arrives with its proof.'.split(' ').map((w, i) => (
                   <span key={i} className={styles.h1Word}><span style={{ '--d': `${700 + i * 70}ms` } as CSSProperties}>{w}</span>{' '}</span>
                 ))}
               </h1>
               <p className={styles.lead}>Ask across your loan agreements and circulars. Unproven claims are struck out.</p>
-              <div className={styles.actions}>
+              <div ref={actionsRef} className={styles.actions}>
                 <Link to={enter} className="btn btn-primary">
                   Open the workspace <ArrowUpRight size={16} strokeWidth={2} aria-hidden="true" />
                 </Link>
                 <a href="#checks" className="btn btn-hud">How it checks</a>
               </div>
             </div>
-            <div className={styles.heroSpecimen}>
+            <div ref={specRef} className={styles.heroSpecimen}>
               <div ref={tilt} className={styles.tilt}>
                 <Specimen />
               </div>
