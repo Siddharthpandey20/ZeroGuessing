@@ -36,6 +36,10 @@ function answerText(a: Answer): string {
   return lines.join('\n').trim()
 }
 
+/** A drag that carries files from the computer (not selected text or a link from the page). */
+const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files')
+const isPdf = (f: File) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+
 /** Clipboard API where allowed (https, localhost); otherwise a hidden textarea, e.g. a phone opening the dev server
  * by its LAN address over plain http. */
 async function copyText(text: string): Promise<boolean> {
@@ -79,6 +83,7 @@ export default function Ask() {
   const [shareFor, setShareFor] = useState<{ turn?: number } | null>(null)
   const [docsOpen, setDocsOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [dragging, setDragging] = useState(false)
   const [notes, setNotes] = useState<string[]>([])
   const docsBtn = useRef<HTMLButtonElement>(null)
 
@@ -205,6 +210,25 @@ export default function Ask() {
   )
   const attach = { attachments, onRemoveAttachment: removeAttachment, waiting }
 
+  // A file dropped just outside the chat (the chat list, the evidence panel) must not make the browser leave the app
+  // to open the PDF. Drops inside the chat are handled by the conversation column below.
+  useEffect(() => {
+    const block = (e: DragEvent) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) e.preventDefault()
+    }
+    const end = () => setDragging(false)
+    window.addEventListener('dragover', block)
+    window.addEventListener('drop', block)
+    window.addEventListener('drop', end)
+    window.addEventListener('dragend', end)
+    return () => {
+      window.removeEventListener('dragover', block)
+      window.removeEventListener('drop', block)
+      window.removeEventListener('drop', end)
+      window.removeEventListener('dragend', end)
+    }
+  }, [])
+
   const closeDocs = useCallback(() => setDocsOpen(false), [])
   const busy = !!pending && !pending.error
   const showEmpty = !chatId || (!!chat.data && chat.data.turns.length === 0 && !pending)
@@ -219,7 +243,30 @@ export default function Ask() {
         }}
       />
 
-      <section className={styles.thread} aria-label={tr('Conversation')}>
+      <section className={styles.thread} aria-label={tr('Conversation')}
+        onDragEnter={(e) => { if (hasFiles(e)) { e.preventDefault(); setDragging(true) } }}
+        onDragOver={(e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = uploading ? 'none' : 'copy'; setDragging(true) } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false) }}
+        onDrop={(e) => {
+          if (!hasFiles(e)) return
+          e.preventDefault()
+          setDragging(false)
+          if (uploading) return
+          const all = Array.from(e.dataTransfer.files)
+          const pdfs = all.filter(isPdf)
+          const others = all.filter((f) => !isPdf(f))
+          if (others.length) {  // shown as failed chips in the question box, like a rejected upload
+            const at = Date.now()
+            setAttached((l) => [...l, ...others.map((f, i) => ({ key: `drop-${at}-${i}`, name: f.name, error: tr('Only PDF files can be added') }))])
+          }
+          if (pdfs.length) void addDocs(pdfs)
+        }}>
+        {dragging && (
+          <div className={styles.dropOverlay} aria-hidden="true">
+            <Upload size={22} strokeWidth={1.8} />
+            <span>{tr('Drop PDFs to add them to this chat')}</span>
+          </div>
+        )}
         <div className={styles.threadTop}>
           <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.railToggle}`} onClick={() => setRailOpen((o) => !o)} aria-label={tr('Show chats')}>
             <PanelLeft size={16} strokeWidth={1.8} />

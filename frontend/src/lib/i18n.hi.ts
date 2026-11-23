@@ -122,6 +122,8 @@ export const HI: Record<string, string> = {
   'Listen': 'सुनें',
   'Run again': 'फिर चलाएँ',
   'Share this answer': 'यह उत्तर साझा करें',
+  'Drop PDFs to add them to this chat': 'PDF यहाँ छोड़ें, वे इस चैट में जुड़ जाएँगे',
+  'Only PDF files can be added': 'केवल PDF फ़ाइलें जोड़ी जा सकती हैं',
   'No answer was produced, so nothing is shown.': 'कोई उत्तर नहीं बना, इसलिए कुछ नहीं दिखाया गया।',
   'This answer failed.': 'यह उत्तर विफल रहा।',
   'Dismiss': 'हटाएँ',
