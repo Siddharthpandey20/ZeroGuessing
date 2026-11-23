@@ -118,6 +118,17 @@ class Amendment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class PairCheck(Base):
+    """Every sentence pair the contradiction model has already judged, conflicting or not, so the same pair is never
+    sent to the model twice (an upload's scan does the work once; questions then reuse the verdict). Sentences get new
+    ids when a document is re-read, so the cascade retires stale verdicts by itself."""
+    __tablename__ = "pair_checks"
+    sentence_a: Mapped[str] = mapped_column(ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True)
+    sentence_b: Mapped[str] = mapped_column(ForeignKey("sentences.id", ondelete="CASCADE"), primary_key=True)
+    conflict: Mapped[bool] = mapped_column(Boolean, default=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Contradiction(Base):
     __tablename__ = "contradictions"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)

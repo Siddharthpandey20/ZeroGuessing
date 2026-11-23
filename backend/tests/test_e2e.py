@@ -166,3 +166,42 @@ async def test_answer_is_not_held_back_by_the_conflict_check(client, monkeypatch
     assert first["faithfulness"] == final["faithfulness"]  # a conflict flag never changes the score
     saved = (await c.get(f"/api/chats/{chat}", headers=H)).json()["turns"][-1]["versions"][-1]["answer"]
     assert saved["conflicts_pending"] is False  # the stored answer is the updated one
+
+
+async def test_conflict_verdicts_are_reused_not_reasked(client, monkeypatch):
+    """A pair the model has judged (at upload or by an earlier question) is never sent to it again; a failed model call
+    records nothing, so that pair is asked next time instead of being taken as 'no conflict'."""
+    from datetime import date
+
+    from sqlalchemy import func, select
+
+    import app.core.contradictions as cmod
+    from app.core.normalise import Value
+    from app.core.retrieve import retrieve
+    from app.db import SessionLocal
+    from app.models import PairCheck, Sentence
+
+    async with SessionLocal() as s:
+        assert await s.scalar(select(func.count()).select_from(PairCheck)) > 0  # the upload scans recorded their verdicts
+        await s.execute(PairCheck.__table__.delete())  # start clean: as if nothing was judged yet
+        await s.commit()
+
+        r = await retrieve(s, "What penal charges apply on an overdue instalment?", date(2026, 11, 23))
+        values = {row.id: [Value(v["type"], v["value"], v.get("period")) for v in row.values]
+                  for row in (await s.execute(select(Sentence.id, Sentence.values)
+                                              .where(Sentence.id.in_([e.sentence_id for e in r.evidence])))).all()}
+        _, pairs = await cmod.plan_evidence_check(s, r.evidence, values)
+        assert pairs, "the penal-charge clauses should be a candidate pair"
+
+        assert await cmod.finish_evidence_check(s, [], pairs, None) == []  # model failed: nothing recorded
+        assert (await cmod.plan_evidence_check(s, r.evidence, values))[1] == pairs
+
+        # at most 6 new pairs per question: once they are settled the next candidates get their turn, until none is left
+        rounds, again = 0, pairs
+        while again and rounds < 5:
+            await cmod.finish_evidence_check(s, [], again, await cmod.confirm_pairs(again))
+            known, again = await cmod.plan_evidence_check(s, r.evidence, values)
+            assert not {frozenset((x.sentence_id, y.sentence_id)) for _, x, y in again} &                 {frozenset((x.sentence_id, y.sentence_id)) for _, x, y in pairs}, "a judged pair came back"
+            pairs, rounds = again or pairs, rounds + 1
+        assert again == [], "judged pairs must not go to the model again"
+        assert known, "the conflict itself is still reported, from the stored alert"
