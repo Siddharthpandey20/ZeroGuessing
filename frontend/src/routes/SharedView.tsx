@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { ArrowUpRight, Download, ShieldCheck } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import type { Answer } from '../lib/types'
+import type { ReportBlock } from '../lib/report'
+import { tr } from '../lib/i18n'
 import { AnswerView, ChainStrip, ConflictCard } from '../app/answer/AnswerView'
 import { fmtDate, fmtDateTime, type Selection } from '../app/answer/selection'
 import styles from './SharedView.module.css'
@@ -13,6 +15,7 @@ interface Snapshot {
   frozen_at: string
   turns: { turn: number; question: string; as_of: string; answer: Answer }[]
   crops: Record<string, string>
+  report?: ReportBlock
 }
 
 /** A frozen, read-only copy of a chat: what the system said, with which proof, on which date. No sign-in needed. */
@@ -51,6 +54,21 @@ export default function SharedView() {
         <p className={styles.frozen}>
           Frozen on {fmtDateTime(s.frozen_at)}. This is a record of what was shown then; the documents may have changed since.
         </p>
+        {s.report && (
+          <div className={styles.seal}>
+            <ShieldCheck size={18} strokeWidth={1.8} aria-hidden="true" />
+            <p>
+              <span className={styles.sealHead}>{tr('Signed report')} <span className="tnum">{s.report.id}</span></span>
+              <span className={styles.sealBody}>
+                {tr('Issued by {name} on {date}. Any change to a question, answer, quote or source document breaks the signature.', {
+                  name: s.report.payload.issued_by.name + (s.report.payload.issued_by.domain ? ` (${s.report.payload.issued_by.domain})` : ''),
+                  date: fmtDate(s.report.payload.issued_at),
+                })}
+              </span>
+            </p>
+            <Link to={`/verify/${s.report.id}`} className="btn btn-ghost btn-sm">{tr('Verify')} <ArrowUpRight size={14} aria-hidden="true" /></Link>
+          </div>
+        )}
         <h1 className={styles.h1}>{s.title}</h1>
         {s.turns.map((t) => (
           <article key={t.turn} className={styles.turn}>

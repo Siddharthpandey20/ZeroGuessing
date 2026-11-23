@@ -15,6 +15,7 @@ const Ask = lazy(() => import('./app/Ask'))
 const Library = lazy(() => import('./app/Library'))
 const Alerts = lazy(() => import('./app/Alerts'))
 const SharedView = lazy(() => import('./routes/SharedView'))
+const VerifyReport = lazy(() => import('./routes/VerifyReport'))
 const NotFound = lazy(() => import('./routes/NotFound'))
 
 const queryClient = new QueryClient({
@@ -27,6 +28,8 @@ const router = createBrowserRouter([
   { path: '/', element: s(<Landing />) },
   { path: '/sign-in', element: s(<SignIn />) },
   { path: '/s/:token', element: s(<SharedView />) },
+  { path: '/verify', element: s(<VerifyReport />) },
+  { path: '/verify/:id', element: s(<VerifyReport />) },
   {
     path: '/app',
     element: s(<Workspace />),

@@ -21,3 +21,7 @@
 .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-xs); padding-top: var(--space-xs); }
 .linkRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs); }
 @media (prefers-reduced-motion: reduce) { .dialog[open] { animation: none; } }
+
+.signed { display: flex; gap: var(--space-xs); align-items: flex-start; margin: 0; font-size: var(--text-sm); line-height: 1.5; color: var(--color-ink-2); }
+.signed svg { flex: none; margin-top: 2px; color: var(--color-success); }
+.signed a { color: var(--color-ink); }

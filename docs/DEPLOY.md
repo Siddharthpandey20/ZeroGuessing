@@ -34,6 +34,7 @@ browser ──HTTPS──► one web service (repo-root Dockerfile)
 | `DATABASE_URL` | from the Postgres service |
 | `GEMINI_API_KEY` | your key (use the paid tier for real, confidential documents) |
 | `JWT_SECRET` | a long random string: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. The app refuses to start without one |
+| `REPORT_SIGNING_KEY`, `PUBLIC_ORIGIN` | signs shared reports (base64 of 32 random bytes; keep it forever, or old reports stop verifying) and the address printed in offline copies |
 | `API_KEY` | a long random string (used by scripts and eval) |
 | `GOOGLE_CLIENT_ID`, `ADMIN_EMAILS` | Google sign-in, and who becomes admin |
 | `ALLOW_PASSWORD_LOGIN`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | optional email/password admin |

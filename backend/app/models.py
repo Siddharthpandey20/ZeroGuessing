@@ -220,3 +220,14 @@ class AnswerCache(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     answer: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Report(Base):
+    """The register of signed reports: what was issued, its fingerprint and signature (see app/core/reports.py)."""
+    __tablename__ = "reports"
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)  # ZG-XXXX-XXXX
+    share_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    signature: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

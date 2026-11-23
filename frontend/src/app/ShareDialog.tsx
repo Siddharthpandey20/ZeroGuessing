@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, Download } from 'lucide-react'
+import { Check, Copy, Download, ShieldCheck } from 'lucide-react'
 import { ApiError, post } from '../lib/api'
 import styles from './ShareDialog.module.css'
 import { tr } from '../lib/i18n'
@@ -10,6 +10,7 @@ export function ShareDialog({ chatId, turn, onClose }: { chatId: string; turn?: 
   const [days, setDays] = useState(7)
   const [crops, setCrops] = useState(true)
   const [token, setToken] = useState<string | null>(null)
+  const [reportId, setReportId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -42,8 +43,9 @@ export function ShareDialog({ chatId, turn, onClose }: { chatId: string; turn?: 
     setBusy(true)
     setError(null)
     try {
-      const r = await post<{ token: string }>(`/api/chats/${chatId}/shares`, { turn: turn ?? null, expires_days: days, include_crops: crops })
+      const r = await post<{ token: string; report_id?: string }>(`/api/chats/${chatId}/shares`, { turn: turn ?? null, expires_days: days, include_crops: crops })
       setToken(r.token)
+      setReportId(r.report_id ?? null)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : tr('The link could not be created.'))
     } finally {
@@ -93,6 +95,12 @@ export function ShareDialog({ chatId, turn, onClose }: { chatId: string; turn?: 
               {tr('Anyone with this link can open it without signing in, until it expires.')}
               {localOnly && ' This address only works on this computer: set VITE_PUBLIC_ORIGIN to your deployed or tunnelled address to share it with others.'}
             </p>
+            {reportId && (
+              <p className={styles.signed}>
+                <ShieldCheck size={15} strokeWidth={1.8} aria-hidden="true" />
+                <span>{tr('Signed as report {id}. Anyone can check that it is genuine and unchanged at', { id: reportId })} <a href={`/verify/${reportId}`} target="_blank" rel="noreferrer">/verify</a>.</span>
+              </p>
+            )}
             <div className={styles.actions}>
               <a className="btn btn-ghost" href={`/public/shares/${token}/html`} target="_blank" rel="noreferrer">
                 <Download size={15} aria-hidden="true" /> {tr('Offline HTML copy')}

@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = ""  # empty = AWS; set for R2/MinIO/Railway buckets
     s3_prefix: str = ""  # optional folder inside the bucket
 
+    # tamper-proof reports: base64 of a 32-byte Ed25519 seed. Empty = derived from JWT_SECRET (stable while it is).
+    report_signing_key: str = ""
+    # the address people open, for links printed inside offline report copies (e.g. https://zeroguess.example)
+    public_origin: str = ""
+
     # production: the built web app (frontend/dist), served by this API from the same origin. Empty = API only.
     static_dir: str = ""
 
