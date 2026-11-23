@@ -13,6 +13,7 @@ import { reducedMotion, useInView, useScrollProgress } from '../lib/motion'
 import { ProofStory } from './landing/ProofStory'
 import { ScrollWords } from './landing/ScrollWords'
 import { SectionPill } from './landing/SectionPill'
+import { Measured, Safeguards } from './landing/Trust'
 import { Specimen } from './landing/Specimen'
 import { HeroScene } from './landing/HeroScene'
 import capWebm from '../assets/video/checks-capsules.webm'
@@ -102,6 +103,8 @@ export default function Landing() {
               <a href="#why">Why</a>
               <a href="#proofs">Proofs</a>
               <a href="#checks">How it checks</a>
+              <a href="#measured">Measured</a>
+              <a href="#safeguards">Safeguards</a>
               {!user && <Link to="/sign-in">Sign in</Link>}
             </div>
             <div className={styles.navEnd}>
@@ -153,6 +156,12 @@ export default function Landing() {
         <IndexBar left="N.003" mid="How it checks" right="N.003" />
         <ChecksBand />
 
+        <IndexBar left="N.004" mid="Measured" right="N.004" />
+        <Measured />
+
+        <IndexBar left="N.005" mid="Safeguards" right="N.005" />
+        <Safeguards />
+
         <section className={styles.close} data-section="Start" aria-labelledby="close-title">
           <SplitText as="h2" text="Ask your first question." className={styles.closeH} />
           <Reveal as="p" className={styles.closeBody} delay={200}>
@@ -174,6 +183,8 @@ export default function Landing() {
             <a href="#why">Why</a>
             <a href="#proofs">Proofs</a>
             <a href="#checks">How it checks</a>
+            <a href="#measured">Measured</a>
+            <a href="#safeguards">Safeguards</a>
             <Link to={enter}>Workspace</Link>
           </nav>
           <ThemeToggle />

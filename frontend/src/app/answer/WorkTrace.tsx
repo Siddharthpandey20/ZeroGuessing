@@ -88,6 +88,7 @@ function Detail({ s }: { s: TraceStep }) {
     case 'verify': {
       const checks = s.checks ?? []
       const ok = checks.filter((c) => c.verdict === 'supported' || c.verdict === 'conflicted').length
+      if (!checks.length) return <p className={styles.detail}>{t('Nothing to check: no claim was drafted, so nothing is shown.')}</p>
       return (
         <>
           <p className={styles.detail}>

@@ -141,6 +141,7 @@ export const HI: Record<string, string> = {
   'Every claim must cite the passages it rests on.': 'हर कथन को उन अंशों का हवाला देना होता है जिन पर वह आधारित है।',
   '{ok} of {n} passed: the quote exists, every number matches it, the clause is in force, and a strict check agrees.':
     '{n} में से {ok} सफल: उद्धरण मौजूद है, हर संख्या उससे मेल खाती है, खंड लागू है, और सख़्त जाँच भी सहमत है।',
+  'Nothing to check: no claim was drafted, so nothing is shown.': 'जाँचने को कुछ नहीं: कोई कथन तैयार नहीं हुआ, इसलिए कुछ नहीं दिखाया गया।',
   'Passed': 'सफल',
   'Passed, conflicting': 'सफल, पर विरोध है',
   'Blocked': 'रोका गया',

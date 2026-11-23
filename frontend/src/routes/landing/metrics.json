@@ -1,0 +1,15 @@
+{
+  "run": "20261123-065336",
+  "questions": 36,
+  "n": 36,
+  "answer_correctness": 0.913,
+  "citation_validity": 0.958,
+  "abstention_precision": 0.833,
+  "abstention_recall": 0.714,
+  "over_abstention": 0.034,
+  "contradiction_recall": 1.0,
+  "false_conflict_rate": 0.042,
+  "mean_faithfulness_pct": 77.1,
+  "latency_p50_ms": 24450,
+  "latency_p95_ms": 46604
+}

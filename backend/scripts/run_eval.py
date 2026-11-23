@@ -112,6 +112,10 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     (out / f"{stamp}.json").write_text(json.dumps({"summary": s, "rows": rows}, indent=2), encoding="utf-8")
+    # the home page's "Measured, not claimed" figures come from the latest run
+    site = ROOT.parent / "frontend" / "src" / "routes" / "landing" / "metrics.json"
+    if site.parent.is_dir():
+        site.write_text(json.dumps({"run": stamp, "questions": len(rows), **s}, indent=2), encoding="utf-8")
     with open(out / f"{stamp}.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()

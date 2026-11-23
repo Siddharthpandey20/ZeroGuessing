@@ -1,0 +1,42 @@
+/* Measured figures and safeguards: the landing page's hairline grid, large tabular numerals, no cards. */
+.wrap { max-width: var(--container); margin-inline: auto; padding: var(--section-gap-s) var(--gutter) 0; display: grid; gap: var(--space-2xl); }
+.head { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-xl); align-items: end; }
+.h2 { margin: 0; font-size: var(--text-section); font-weight: 560; letter-spacing: var(--tracking-display); line-height: var(--leading-display); color: var(--color-ink); text-wrap: balance; }
+.lead { margin: 0; font-size: var(--text-lead); line-height: 1.5; color: var(--color-ink-2); max-width: 46ch; }
+
+.figures { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: var(--rule-hair) solid var(--color-ink-a30); }
+.figure { display: grid; gap: var(--space-2xs); align-content: start; padding: var(--space-lg) var(--space-lg) var(--space-xl) 0; border-bottom: var(--rule-hair) solid var(--color-ink-a30); }
+.figure:not(:nth-child(3n + 1)) { padding-left: var(--space-lg); border-left: var(--rule-hair) solid var(--color-ink-a30); }
+.value {
+  font-family: var(--font-display); font-size: clamp(3rem, 4.6vw + 0.5rem, 5.5rem); font-weight: 520; line-height: 1;
+  letter-spacing: -0.04em; font-variant-numeric: tabular-nums; color: var(--color-ink); margin-bottom: var(--space-xs);
+}
+/* a lime underline for what passed, a red one for what was stopped: the app's verdict colours */
+.value[data-tone] { text-decoration: underline; text-decoration-thickness: 0.09em; text-underline-offset: 0.12em; }
+.value[data-tone="proof"] { text-decoration-color: var(--color-accent-2); }
+.value[data-tone="block"] { text-decoration-color: var(--color-blocked); }
+.label { font-size: var(--text-lg); font-weight: 560; letter-spacing: var(--tracking-title); color: var(--color-ink); }
+.note { font-size: var(--text-sm); line-height: 1.5; color: var(--color-ink-2); max-width: 34ch; }
+
+.repro { margin: calc(var(--space-lg) * -1) 0 0; font-size: var(--text-sm); color: var(--color-ink-2); }
+.repro :global(.readout) { padding: 2px 8px; margin-right: 6px; border-radius: var(--radius-chip); background: var(--color-accent); color: var(--color-accent-ink); }
+.repro code { font-family: var(--font-outlier); font-size: var(--text-xs); padding: 2px 6px; border-radius: 6px; background: var(--color-ink-a06); color: var(--color-ink); }
+
+.guards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: var(--rule-hair) solid var(--color-ink-a30); }
+.guard { display: grid; gap: var(--space-sm); align-content: start; padding: var(--space-lg) var(--space-lg) var(--space-xl) 0; border-bottom: var(--rule-hair) solid var(--color-ink-a30); }
+.guard:not(:nth-child(3n + 1)) { padding-left: var(--space-lg); border-left: var(--rule-hair) solid var(--color-ink-a30); }
+.guard h3 { margin: 0; font-family: var(--font-body); font-size: var(--text-xl); font-weight: 560; letter-spacing: var(--tracking-title); line-height: 1.2; color: var(--color-ink); }
+.guard p { margin: 0; font-size: var(--text-sm); line-height: 1.55; color: var(--color-ink-2); max-width: 40ch; }
+.icon { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-chip); background: var(--color-ink); color: var(--color-paper-2); }
+
+@media (max-width: 960px) {
+  .head { grid-template-columns: minmax(0, 1fr); gap: var(--space-md); }
+  .figures, .guards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .figure:not(:nth-child(3n + 1)), .guard:not(:nth-child(3n + 1)) { padding-left: 0; border-left: 0; }
+  .figure:nth-child(2n), .guard:nth-child(2n) { padding-left: var(--space-lg); border-left: var(--rule-hair) solid var(--color-ink-a30); }
+}
+@media (max-width: 600px) {
+  .wrap { padding-inline: var(--space-md); }
+  .figures, .guards { grid-template-columns: minmax(0, 1fr); }
+  .figure:nth-child(2n), .guard:nth-child(2n) { padding-left: 0; border-left: 0; }
+}
