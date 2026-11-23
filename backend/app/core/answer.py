@@ -78,11 +78,19 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     `history`: earlier turns of the chat ({question, answer}), used to understand a follow-up question."""
     t0 = time.perf_counter()
     timings: dict[str, int] = {}
+    # "show the work": every step the pipeline took, what it looked at and how long it took. Streamed as it happens
+    # and kept with the answer. Structured data only; the web app words it (English or Hindi).
+    trace: list[dict] = []
 
     def tick(name: str, since: float) -> float:
         now = time.perf_counter()
         timings[name] = int((now - since) * 1000)
         return now
+
+    def step(sid: str, since: float, **data) -> dict:
+        st = {"id": sid, "ms": int((time.perf_counter() - since) * 1000), **data}
+        trace.append(st)
+        return {"type": "trace", "step": st}
 
     s = get_settings()
     asked = question
@@ -115,11 +123,15 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         return
     resolved = None
     if history and is_followup(question):
+        t = time.perf_counter()
         resolved = await resolve_followup(question, history)
         question = resolved  # search, draft and verify against the standalone question; the user's words stay on screen
+        if resolved != asked:
+            yield step("understand", t, resolved=resolved, turns=len(history))
     scope = ",".join(sorted(doc_ids)) if doc_ids is not None else "*"
     cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{await corpus_version(session)}".encode()).hexdigest()
     if use_cache and s.answer_cache and (hit := await session.get(AnswerCache, cache_key)):
+        # the same question on the same documents and date: the stored, already-verified answer, with its own trace
         yield {"type": "answer", "answer": {**hit.answer, "cached": True}}
         return
 
@@ -127,15 +139,23 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     q_en = question
     if lang == "hi":
         yield {"type": "stage", "stage": "translating_question"}
+        t = time.perf_counter()
         try:
             q_en = (await get_llm().generate_json(QueryTranslation, question,
                     "Translate this Hindi question into precise English. Keep numbers and terms.")).english
         except Exception as e:
             log.warning("query translation failed: %s", e)
+        yield step("translate_question", t, english=q_en if q_en != question else None)
 
     yield {"type": "stage", "stage": "retrieving"}
     t = time.perf_counter()
     r = await retrieve(session, question, as_of, search_text=q_en, doc_ids=doc_ids)
+    yield step("search", t, docs=r.docs_searched, terms=r.terms, passages=len(r.evidence),
+               keyword_hits=r.fts_hits, best_score=round(r.best_dense, 3) if r.best_dense is not None else None,
+               threshold=s.min_dense_score, sources=_sources(r))
+    if versions := _version_notes(r):
+        yield step("versions", t, as_of=as_of.isoformat(), clauses=versions)
+        trace[-1]["ms"] = 0
     t = tick("retrieve", t)
 
     base = {"question": asked, "question_resolved": resolved, "question_en": q_en if lang == "hi" else None, "lang": lang, "as_of": as_of.isoformat(),
@@ -143,8 +163,10 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
 
     gate_fail = not r.evidence or (r.best_dense is not None and r.best_dense < s.min_dense_score and r.fts_hits == 0)
     if gate_fail:
+        yield step("gate", t, passed=False, best_score=round(r.best_dense, 3) if r.best_dense is not None else None,
+                   threshold=s.min_dense_score)
         ans = {**base, **_abstain(r, [], ["no passage in the loaded documents is related to this question"]),
-               "timings_ms": {**timings, "total": int((time.perf_counter() - t0) * 1000)}}
+               "timings_ms": {**timings, "total": int((time.perf_counter() - t0) * 1000)}, "trace": trace}
         yield {"type": "answer", "answer": ans}
         return
 
@@ -156,10 +178,13 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         log.exception("draft failed")
         yield {"type": "error", "message": f"answer generation failed: {e}"}
         return
+    yield step("draft", t, claims=len(draft.claims), evidence=len(r.evidence), missing=list(draft.missing))
     t = tick("draft", t)
 
     yield {"type": "stage", "stage": "verifying", "claims": len(draft.claims)}
     claims = await verify(draft, r.evidence, as_of.isoformat())
+    yield step("verify", t, checks=[{"text": c.text, "verdict": c.verdict, "reason": c.reason, "kind": c.kind,
+                                      "quotes": len(c.citations), "judge": c.judge} for c in claims])
     t = tick("verify", t)
 
     yield {"type": "stage", "stage": "checking_contradictions"}
@@ -175,11 +200,13 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         if hits and vc.verdict == "supported":
             vc.verdict, vc.conflict_ids = "conflicted", hits
             vc.reason = "the documents contain a conflicting clause on this point (shown side by side)"
+    yield step("conflicts", t, pairs=len(contras), relevant=len(relevant))
     t = tick("contradictions", t)
 
     if lang == "hi":
         yield {"type": "stage", "stage": "translating_answer"}
         await _translate(claims)
+        yield step("translate_answer", t, kept=sum(1 for c in claims if c.text_hi), total=len(claims))
         t = tick("translate", t)
 
     shown = [c for c in claims if c.verdict in ("supported", "conflicted")]
@@ -195,12 +222,39 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     out["contradictions"] = await alert_view(session, relevant)
     out["amendment_chains"] = _chains(r)
     out["timings_ms"] = {**timings, "total": int((time.perf_counter() - t0) * 1000)}
+    out["trace"] = trace
     out["cached"] = False
 
     if s.answer_cache:
         await session.merge(AnswerCache(key=cache_key, answer=out))  # upsert: "run again" re-answers an already-cached key
         await session.commit()
     yield {"type": "answer", "answer": out}
+
+
+def _sources(r: RetrievalResult, n: int = 8) -> list[dict]:
+    """The distinct clauses the search read, best first (what the model was shown)."""
+    out, seen = [], set()
+    for e in r.evidence:
+        k = (e.doc_id, e.clause_ref)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append({"doc_title": e.doc_title, "clause_ref": e.clause_ref, "page": e.page, "sentence_id": e.sentence_id,
+                    "status": e.status, "added_for_amendment": e.injected})
+        if len(out) == n:
+            break
+    return out
+
+
+def _version_notes(r: RetrievalResult) -> list[dict]:
+    """Clauses whose wording changed over time, and which version applies on the as-of date."""
+    out = []
+    for k, st in r.statuses.items():
+        if st.history or st.pending:
+            src = st.current_source or {}
+            out.append({"key": k, "state": st.state, "changes": len(st.history), "pending": len(st.pending),
+                        "by": src.get("doc_title"), "since": str(src.get("effective_date") or "") or None})
+    return out
 
 
 def _chains(r: RetrievalResult) -> list[dict]:

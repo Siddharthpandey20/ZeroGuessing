@@ -1,9 +1,10 @@
 import { useId, useState } from 'react'
-import { ArrowRightLeft, ChevronDown, CircleSlash, History } from 'lucide-react'
+import { ArrowRightLeft, BadgeCheck, ChevronDown, CircleSlash, History, SearchX } from 'lucide-react'
 import { CitationChip, type ChipSource } from '../../components/CitationChip'
 import type { SegmentTone } from '../../components/FaithMeter'
 import type { Answer, Calculation, Chain, Citation, Claim, Conflict } from '../../lib/types'
 import { distinctChains, fmtDate, inr, shortDoc, type CropFor, type Selection } from './selection'
+import { WorkTrace } from './WorkTrace'
 import styles from './AnswerView.module.css'
 
 interface Props {
@@ -75,6 +76,7 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
 
   return (
     <div className={styles.answer} data-status={answer.status} data-fresh={fresh || undefined}>
+      {!!answer.trace?.length && <WorkTrace steps={answer.trace} totalMs={answer.timings_ms?.total} cached={answer.cached} noProof={abstained} />}
       {answer.question_resolved && (
         <p className={styles.readAs}><span>Read as:</span> {answer.question_resolved}</p>
       )}
@@ -110,6 +112,8 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
       )}
 
       {calcs.map((calc, i) => <CalcCard key={i} calc={calc} />)}
+
+      {!abstained && <Verdict answer={answer} shown={shown.length} blocked={blocked.length} />}
 
       {hasNotices && (
         <ul className={styles.notices}>
@@ -206,7 +210,7 @@ function chainLine(ch: Chain) {
 }
 
 /** The figure a version sets ("2%", "₹500", "Nil"), when it states one. */
-function keyValue(t: string): string | null {
+export function keyValue(t: string): string | null {
   if (/\bnil\b|\bno\s+(?:prepayment\s+|foreclosure\s+)?(?:penalty|charge|fee)s?\b/i.test(t)) return 'Nil'
   const m = t.match(/₹\s?[\d,]+(?:\.\d+)?|\d+(?:\.\d+)?\s?%/)
   return m ? m[0].replace(/\s/g, '') : null
@@ -221,7 +225,15 @@ function Abstention({ answer, cropFor, selectedSentence, onCite }: {
       <p className={styles.abstainHead}>
         <CircleSlash size={20} strokeWidth={1.8} aria-hidden="true" /> I don’t have proof for this.
       </p>
-      {a.missing.length > 0 && <p className={styles.missing}>{a.missing.map(endWithStop).join(' ')}</p>}
+      <p className={styles.abstainLead}>Nothing was guessed. No passage in this chat’s documents states the answer, so no claim was shown.</p>
+      {a.missing.length > 0 && (
+        <div className={styles.settle}>
+          <p className={styles.settleHead}>What would settle it</p>
+          <ul className={styles.settleList}>
+            {a.missing.map((m, i) => <li key={i}>{endWithStop(sentenceCase(m))}</li>)}
+          </ul>
+        </div>
+      )}
       {(answer.searched || a.closest.length > 0) && (
         <Disclosure label="What I searched" kind="searched">
           <dl className={styles.facts}>
@@ -373,21 +385,21 @@ export function ConflictCard({ x, cropFor, onOpen, onCite, selectedSentence, lar
   )
 }
 
-function eventValue(e: Chain['events'][number]) {
+export function eventValue(e: Chain['events'][number]) {
   return (e.new_text || e.text || e.quote || '').trim()
 }
 
 const STATE_WORD: Record<string, string> = { current: 'In force', superseded: 'Superseded', not_yet_effective: 'Not yet in force', pending: 'Not yet in force', deleted: 'Deleted' }
 
 /** One rule's history, oldest first: which document said what, from when, and which version applies on the date asked. */
-export function ChainStrip({ chain, onOpen, vertical }: { chain: Chain; onOpen?: () => void; vertical?: boolean }) {
+export function ChainStrip({ chain, onOpen, vertical, active }: { chain: Chain; onOpen?: () => void; vertical?: boolean; active?: number }) {
   return (
     <div className={styles.chain} data-full={vertical || undefined}>
       <ol className={styles.chainList}>
         {chain.events.map((e, i) => {
           const state = (e.state as string) || 'superseded'
           return (
-            <li key={i} data-state={state}>
+            <li key={i} data-state={state} data-active={active === i || undefined}>
               <span className={styles.chainNode} aria-hidden="true" />
               <div className={styles.chainRow}>
                 <span className={styles.chainDoc}>{shortDoc(e.doc_title ?? '')}{e.clause_ref ? `, ${e.clause_ref}` : ''}</span>
@@ -401,6 +413,52 @@ export function ChainStrip({ chain, onOpen, vertical }: { chain: Chain; onOpen?:
       </ol>
       {onOpen && !vertical && (
         <button type="button" className="btn btn-quiet btn-sm" onClick={onOpen}>Open each version’s page</button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The verdict in one tinted box, read before the details: green when every shown claim is backed by a quote,
+ * amber when the documents disagree, red when part of the question has no proof (and what would settle it).
+ */
+function Verdict({ answer, shown, blocked }: { answer: Answer; shown: number; blocked: number }) {
+  if (answer.status === 'chat' || shown === 0) return null
+  const missing = answer.abstention?.missing ?? []
+  const gaps = missing.length > 0
+  return (
+    <div className={styles.verdicts}>
+      {answer.status === 'conflicted' ? (
+        <div className={styles.callout} data-tone="conflict" role="note">
+          <ArrowRightLeft size={16} strokeWidth={2} aria-hidden="true" />
+          <div>
+            <p className={styles.calloutHead}>Your documents disagree on this</p>
+            <p className={styles.calloutBody}>Each side is quoted word for word. Compare them before relying on the answer.</p>
+          </div>
+        </div>
+      ) : !gaps && blocked === 0 ? (
+        <div className={styles.callout} data-tone="proof" role="note">
+          <BadgeCheck size={16} strokeWidth={2} aria-hidden="true" />
+          <div>
+            <p className={styles.calloutHead}>Verified against your documents</p>
+            <p className={styles.calloutBody}>
+              {shown === 1 ? 'The claim is' : `All ${shown} claims are`} backed by a verbatim quote, with every number checked,
+              under the rules in force on {fmtDate(answer.as_of)}.
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {gaps && (
+        <div className={styles.callout} data-tone="gap" role="note">
+          <SearchX size={16} strokeWidth={2} aria-hidden="true" />
+          <div>
+            <p className={styles.calloutHead}>Part of this is not in your documents</p>
+            <p className={styles.calloutBody}>What is shown above is proven. For the rest there is no proof, so nothing was guessed:</p>
+            <ul className={styles.settleList}>
+              {missing.map((m, i) => <li key={i}>{endWithStop(sentenceCase(m))}</li>)}
+            </ul>
+          </div>
+        </div>
       )}
     </div>
   )

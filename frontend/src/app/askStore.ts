@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import { streamEvents } from '../lib/sse'
-import type { Message, Stage } from '../lib/types'
+import type { Message, Stage, TraceStep } from '../lib/types'
 
 /**
  * In-flight answers, kept outside React so a stream survives route changes
@@ -14,6 +14,8 @@ export interface Pending {
   asOf: string
   stage: Stage | null
   info: { evidence?: number; claims?: number }
+  trace: TraceStep[] // finished steps, streamed as they happen
+  startedAt: number
   error?: string
 }
 
@@ -50,13 +52,16 @@ export async function runAnswer(
   onDone?: (m: Message) => void,
 ) {
   const { chatId } = opts
-  let p: Pending = { chatId, turn: opts.turn, question: opts.question, asOf: opts.asOf, stage: null, info: {} }
+  let p: Pending = { chatId, turn: opts.turn, question: opts.question, asOf: opts.asOf, stage: null, info: {}, trace: [], startedAt: Date.now() }
   set(chatId, p)
   try {
     for await (const ev of streamEvents(opts.path, opts.body, { method: opts.method })) {
       const d = ev.data as Record<string, unknown>
       if (ev.event === 'stage') {
         p = { ...p, stage: d.stage as Stage, info: { ...p.info, ...(d.evidence ? { evidence: d.evidence as number } : {}), ...(d.claims ? { claims: d.claims as number } : {}) } }
+        set(chatId, p)
+      } else if (ev.event === 'trace') {
+        p = { ...p, trace: [...p.trace, d.step as TraceStep] }
         set(chatId, p)
       } else if (ev.event === 'answer') {
         const msg = d.message as Message

@@ -71,6 +71,10 @@ async def test_pipeline(client):
     assert "Nil" in a["claims"][0]["text"] and a["claims"][0]["verdict"] == "supported", a["claims"]
     assert a["amendment_chains"], a
     assert a["faithfulness"]["pct"] == 100.0
+    steps = {st["id"]: st for st in a["trace"]}  # the "show work" trace: what was searched, read, checked
+    assert {"search", "versions", "draft", "verify", "conflicts"} <= steps.keys(), list(steps)
+    assert steps["search"]["sources"] and steps["verify"]["checks"][0]["verdict"] == "supported"
+    assert all(isinstance(st["ms"], int) for st in a["trace"])
 
     # edit & resend with an older as-of date -> version 2 of turn 1, answer flips to 2%
     r = await c.put(f"/api/chats/{chat}/turns/1?stream=false", headers=H,

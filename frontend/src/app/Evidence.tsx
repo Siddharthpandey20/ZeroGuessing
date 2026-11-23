@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
 import { api, fileUrl, pageUrl } from '../lib/api'
-import type { Citation, DocumentRow } from '../lib/types'
-import { ChainStrip, ConflictCard } from './answer/AnswerView'
+import type { Chain, Citation, DocumentRow } from '../lib/types'
+import { AsOfSlider } from './answer/AsOfSlider'
+import { ChainStrip, ConflictCard, eventValue, keyValue } from './answer/AnswerView'
 import { briefDoc, type CropFor, type Selection } from './answer/selection'
 import styles from './Evidence.module.css'
 
@@ -37,7 +38,7 @@ export function Evidence({ selection, onClose, onSelect, cropFor }: {
         )}
         {selection.kind === 'chain' && (
           <div className={styles.stack}>
-            <ChainStrip chain={selection.chain} vertical />
+            <ChainVersions chain={selection.chain} />
             <div className={styles.pair}>
               {selection.chain.events.filter((e) => e.sentence_id && e.page).map((e, i) => (
                 <button key={i} type="button" className="btn btn-ghost btn-sm"
@@ -119,5 +120,18 @@ function PageView({ citation, highlight }: { citation: Citation; highlight: stri
 
       <blockquote className={styles.quote}>“{citation.quote}”</blockquote>
     </div>
+  )
+}
+
+/** The date slider over a rule's history, with the timeline below it following the version under the thumb. */
+function ChainVersions({ chain }: { chain: Chain }) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [active, setActive] = useState<number | undefined>(undefined)
+  useEffect(() => setActive(undefined), [chain])
+  return (
+    <>
+      <AsOfSlider chain={chain} asOf={today} onVersion={setActive} value={(e) => keyValue(eventValue(e))} />
+      <ChainStrip chain={chain} vertical active={active} />
+    </>
   )
 }

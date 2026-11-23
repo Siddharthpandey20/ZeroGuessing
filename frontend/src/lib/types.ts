@@ -113,6 +113,8 @@ export interface Answer {
   amendment_chains: Chain[]
   abstention: Abstention | null
   timings_ms: Record<string, number>
+  /** every step the pipeline took, what it read and how long each took ("show work") */
+  trace?: TraceStep[]
   cached?: boolean
   /** status chat: the reply text */
   reply?: string
@@ -253,4 +255,49 @@ export interface UploadResult {
   job_id: string | null
   status: 'queued' | 'duplicate' | 'rejected'
   detail: string | null
+}
+
+export interface TraceSource {
+  doc_title: string
+  clause_ref: string
+  page: number
+  sentence_id: string
+  status: string
+  added_for_amendment: boolean
+}
+
+export interface TraceCheck {
+  text: string
+  verdict: Verdict | string
+  reason: string | null
+  kind: string
+  quotes: number
+  judge: string | null
+}
+
+/** One step of the pipeline, as streamed (`trace` events) and kept on the answer. */
+export interface TraceStep {
+  id: 'understand' | 'translate_question' | 'search' | 'versions' | 'gate' | 'draft' | 'verify' | 'conflicts' | 'translate_answer' | string
+  ms: number
+  resolved?: string
+  turns?: number
+  english?: string | null
+  docs?: number
+  terms?: string[]
+  passages?: number
+  keyword_hits?: number
+  best_score?: number | null
+  threshold?: number
+  sources?: TraceSource[]
+  as_of?: string
+  clauses?: { key: string; state: string; changes: number; pending: number; by: string | null; since: string | null }[]
+  passed?: boolean
+  claims?: number
+  evidence?: number
+  missing?: string[]
+  checks?: TraceCheck[]
+  pairs?: number
+  relevant?: number
+  kept?: number
+  total?: number
 }

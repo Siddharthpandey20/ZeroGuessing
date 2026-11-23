@@ -6,7 +6,7 @@ import { api, ApiError, cropUrl, del, patch, post } from '../lib/api'
 import { canSpeak, speak, spokenAnswer, stopSpeaking } from '../lib/speech'
 import type { ChatDetail, ChatDoc, ChatSummary, Message, Turn, UploadResult } from '../lib/types'
 import { AnswerView } from './answer/AnswerView'
-import { StageReadout } from './answer/StageReadout'
+import { LiveTrace } from './answer/WorkTrace'
 import { fmtDate, type Selection } from './answer/selection'
 import { ChatDocs, isReady } from './ChatDocs'
 import { Composer, type AskOptions, type InputMode } from './Composer'
@@ -454,7 +454,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
 
                 <div className={styles.sheet}>
                   {live ? (
-                    live.error ? <StreamError p={live} chatId={chatId} /> : <StageReadout stage={live.stage} info={live.info} />
+                    live.error ? <StreamError p={live} chatId={chatId} /> : <LiveTrace steps={live.trace} stage={live.stage} info={live.info} startedAt={live.startedAt} />
                   ) : m.status === 'failed' || !m.answer || m.answer.error ? (
                     <FailedAnswer message={(m.answer?.error as string) ?? 'This answer failed.'} onRetry={() => regenerate(t, m)} />
                   ) : (
@@ -486,7 +486,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
             <article key="pending" className={`${styles.turn} ${styles.arrive}`}>
               <header className={styles.qRow}><p className={styles.question}>{pending.question}</p></header>
               <div className={styles.sheet}>
-                {pending.error ? <StreamError p={pending} chatId={chatId} /> : <StageReadout stage={pending.stage} info={pending.info} />}
+                {pending.error ? <StreamError p={pending} chatId={chatId} /> : <LiveTrace steps={pending.trace} stage={pending.stage} info={pending.info} startedAt={pending.startedAt} />}
               </div>
             </article>
           )}

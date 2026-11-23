@@ -1,0 +1,68 @@
+/* The work behind an answer: a quiet one-line toggle, opening onto a hairline timeline of steps. */
+.trace { display: grid; gap: var(--space-xs); margin-bottom: var(--space-md); }
+
+.toggle {
+  display: inline-flex; align-items: center; gap: var(--space-xs); justify-self: start; max-width: 100%;
+  padding: 5px 10px 5px 8px; border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-pill);
+  background: transparent; color: var(--color-ink-2); font: inherit; font-size: var(--text-xs); line-height: 1.3;
+  cursor: pointer; transition: background-color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
+}
+.toggle:hover { background: var(--color-ink-a05); border-color: var(--color-rule-strong); }
+.toggle:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.toggle[data-static] { cursor: default; }
+.toggle[data-static]:hover { background: transparent; border-color: var(--color-rule); }
+
+.glyph { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--color-accent-2); box-shadow: inset 0 0 0 1px var(--color-ink-a14); }
+.glyph[data-tone="stop"] { background: var(--color-blocked); box-shadow: none; }
+.glyph[data-tone="live"] { background: var(--color-ink-2); box-shadow: none; animation: blink 0.9s steps(2, jump-none) infinite; }
+@keyframes blink { 50% { opacity: 0.2; } }
+
+.head { font-weight: 560; color: var(--color-ink); white-space: nowrap; }
+.summary { color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-family: var(--font-outlier); font-size: var(--text-2xs); letter-spacing: 0.01em; }
+.chev { flex: none; color: var(--color-muted); transition: transform var(--dur-short) var(--ease-out); }
+.toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+.body { padding: var(--space-2xs) 0 0 3px; animation: open var(--dur-short) var(--ease-out); }
+@keyframes open { from { opacity: 0; transform: translateY(-3px); } }
+.cachedNote { margin: 0 0 var(--space-xs) 18px; font-size: var(--text-xs); color: var(--color-muted); }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; }
+.step { position: relative; padding: 0 0 var(--space-sm) 18px; }
+/* the rail and its nodes */
+.step::before { content: ""; position: absolute; left: 3px; top: 12px; bottom: -2px; width: var(--rule-hair); background: var(--color-rule); }
+.step:last-child::before { display: none; }
+.step::after { content: ""; position: absolute; left: 0; top: 6px; width: 7px; height: 7px; border-radius: 2px; background: var(--color-paper-2); box-shadow: inset 0 0 0 1.5px var(--color-ink-2); }
+.step[data-id="gate"]::after { box-shadow: inset 0 0 0 1.5px var(--color-blocked); }
+.step[data-live]::after { background: var(--color-ink-2); animation: blink 0.9s steps(2, jump-none) infinite; }
+.step[data-live] .stepTitle { color: var(--color-ink-2); }
+
+.stepHead { display: flex; align-items: baseline; gap: var(--space-sm); }
+.stepTitle { font-size: var(--text-sm); font-weight: 540; color: var(--color-ink); }
+.ms { margin-left: auto; flex: none; font-family: var(--font-outlier); font-size: var(--text-2xs); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+
+.detail { margin: 2px 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-ink-2); max-width: var(--measure); }
+.lines { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 2px; font-size: var(--text-xs); color: var(--color-ink-2); }
+
+.sources { list-style: none; margin: var(--space-xs) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.source {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 8px; border-radius: var(--radius-chip);
+  background: var(--color-paper-3-a50); box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule); font-size: var(--text-2xs); color: var(--color-ink-2);
+}
+.source[data-status] { color: var(--color-muted); }
+.source[data-status] .sourceDoc { text-decoration: line-through; text-decoration-color: var(--color-ink-a30); }
+.sourceDoc { font-weight: 540; color: inherit; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sourceWhere { font-family: var(--font-outlier); color: var(--color-muted); white-space: nowrap; }
+.sourceTag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-pending); }
+
+.checks { list-style: none; margin: var(--space-xs) 0 0; padding: 0; display: grid; gap: 6px; }
+.checks li { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--space-xs); font-size: var(--text-xs); line-height: 1.45; color: var(--color-ink-2); }
+.mark { grid-row: span 2; display: grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; border-radius: 4px; background: var(--color-accent); color: var(--color-accent-ink); }
+.checks li[data-verdict="conflicted"] .mark { background: var(--color-conflict); color: var(--color-conflict-ink); }
+.checks li[data-verdict="unsupported"] .mark, .checks li[data-verdict="contradicted"] .mark { background: var(--color-blocked-soft); color: var(--color-blocked-deep); }
+.checks li[data-verdict="unsupported"] .checkText, .checks li[data-verdict="contradicted"] .checkText { text-decoration: line-through; text-decoration-color: var(--color-blocked); color: var(--color-muted); }
+.checkWhy { grid-column: 2; color: var(--color-blocked-deep); font-size: var(--text-2xs); }
+
+.ghost { display: grid; gap: 12px; padding-top: var(--space-2xs); }
+.ghost span { height: 14px; }
+
+@media (prefers-reduced-motion: reduce) { .glyph[data-tone="live"], .step[data-live]::after, .body { animation: none; } }
