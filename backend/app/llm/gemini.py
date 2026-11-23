@@ -15,6 +15,7 @@ from google.genai import errors, types
 from pydantic import BaseModel, ValidationError
 
 from app.config import get_settings
+from app.llm import usage
 
 log = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -59,8 +60,12 @@ class GeminiClient:
                         self.client.aio.models.generate_content(model=model, contents=prompt, config=config),
                         timeout=self.timeout,
                     )
+                    # billed even if the JSON turns out malformed: count before validating
+                    tok = usage.record(schema.__name__, model, getattr(resp, "usage_metadata", None))
                     out = schema.model_validate_json(resp.text or "")
-                    log.info("llm ok model=%s schema=%s ms=%d", model, schema.__name__, (time.perf_counter() - t0) * 1000)
+                    log.info("llm ok model=%s schema=%s ms=%d tokens in=%d out=%d think=%d cached=%d", model,
+                             schema.__name__, (time.perf_counter() - t0) * 1000,
+                             tok["input"], tok["output"], tok["thinking"], tok["cached"])
                     return out
                 except ValidationError as e:  # malformed JSON: one more try on same model, then move on
                     last = e
@@ -92,6 +97,7 @@ class GeminiClient:
                 resp = await asyncio.wait_for(self.client.aio.models.generate_content(
                     model=model, contents=[types.Part.from_bytes(data=data, mime_type=mime), prompt],
                     config=types.GenerateContentConfig(temperature=0)), timeout=self.timeout)
+                usage.record("read_image", model, getattr(resp, "usage_metadata", None))
                 return (resp.text or "").strip()
             except (errors.APIError, TimeoutError) as e:
                 last = e

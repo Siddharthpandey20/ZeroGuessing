@@ -62,7 +62,8 @@ class FakeLLM:
 
         def find(*words, current=True):
             for eid, meta, text in ev:
-                if all(w in text.lower() for w in words) and (not current or "CURRENT" in meta):
+                # a line is CURRENT when it carries no status after the page: "(clause 7.2 | p.1)"
+                if all(w in text.lower() for w in words) and (not current or meta.count("|") == 1):
                     return eid, text
             return None, None
 

@@ -58,6 +58,9 @@ def score(item: dict, ans: dict) -> dict:
         "latency_ms": (ans.get("timings_ms") or {}).get("total"), "cached": ans.get("cached"),
         # what the user waits for: the verified answer is shown before a slow conflict check finishes
         "first_answer_ms": (ans.get("timings_ms") or {}).get("first_answer") or (ans.get("timings_ms") or {}).get("total"),
+        # tokens billed for this answer (None: answered by a server that predates token tracking)
+        **{f"tokens_{k}": (ans.get("tokens") or {}).get(k) for k in ("input", "output", "thinking", "cached", "total")},
+        "llm_calls": len((ans.get("tokens") or {}).get("calls", [])) if ans.get("tokens") else None,
     }
 
 
@@ -85,7 +88,21 @@ def summary(rows: list[dict]) -> dict:
         "latency_p95_ms": int(sorted(lat)[int(0.95 * (len(lat) - 1))]) if lat else None,
         "first_answer_p50_ms": int(statistics.median(first)) if (first := [r["first_answer_ms"] for r in rows if r["first_answer_ms"] and not r["cached"]]) else None,
         "first_answer_p95_ms": int(sorted(first)[int(0.95 * (len(first) - 1))]) if first else None,
+        **tokens_summary(rows),
     }
+
+
+def tokens_summary(rows: list[dict]) -> dict:
+    """Mean tokens per freshly answered question (cache hits cost ~0 and would hide the real cost), and run totals."""
+    fresh = [r for r in rows if r.get("tokens_total") is not None and not r["cached"]]
+    if not fresh:
+        return {}
+    out = {f"tokens_per_q_{k}": round(statistics.mean(r[f"tokens_{k}"] for r in fresh))
+           for k in ("input", "output", "thinking", "total")}
+    out["tokens_per_q_total_p95"] = sorted(r["tokens_total"] for r in fresh)[int(0.95 * (len(fresh) - 1))]
+    out["tokens_run"] = {k: sum(r[f"tokens_{k}"] for r in rows if r.get(f"tokens_{k}") is not None)
+                         for k in ("input", "output", "thinking", "cached", "total")}
+    return out
 
 
 def main() -> None:
@@ -95,11 +112,14 @@ def main() -> None:
     ap.add_argument("--ingest", action="store_true")
     ap.add_argument("--only", default="", help="comma-separated ids")
     ap.add_argument("--demo", action="store_true", help="add the demo corpus to the eval chat (chats answer only from their own documents)")
+    ap.add_argument("--gold", default="eval/gold.jsonl", help="question file, relative to backend/")
+    ap.add_argument("--docs-from", default="", help="link this chat's documents to the eval chat (re-upload is de-duplicated: no re-ingest)")
+    ap.add_argument("--no-site", action="store_true", help="don't write the home page's metrics.json")
     args = ap.parse_args()
     c = httpx.Client(base_url=args.base, headers={"X-API-Key": args.key}, timeout=180)
     if args.ingest:
         ingest(c)
-    items = [json.loads(line) for line in (ROOT / "eval" / "gold.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    items = [json.loads(line) for line in (ROOT / args.gold).read_text(encoding="utf-8").splitlines() if line.strip()]
     if args.only:
         items = [i for i in items if i["id"] in args.only.split(",")]
     chat = c.post("/api/chats", json={"title": f"eval {datetime.now():%Y-%m-%d %H:%M}"}).json()["id"]
@@ -110,6 +130,11 @@ def main() -> None:
             if docs and all(d["ingest_status"] not in ("queued", "parsing", "embedding") for d in docs):
                 break
             time.sleep(2)
+        print("eval chat documents:", {d["title"][:40]: d["ingest_status"] for d in c.get(f"/api/chats/{chat}/documents").json()})
+    if args.docs_from:
+        for d in c.get(f"/api/chats/{args.docs_from}/documents").json():
+            pdf = c.get(f"/api/documents/{d['id']}/file").content
+            c.post(f"/api/chats/{chat}/documents", files=[("files", (d["filename"], pdf, "application/pdf"))])
         print("eval chat documents:", {d["title"][:40]: d["ingest_status"] for d in c.get(f"/api/chats/{chat}/documents").json()})
     rows = []
     for it in items:
@@ -127,7 +152,7 @@ def main() -> None:
     (out / f"{stamp}.json").write_text(json.dumps({"summary": s, "rows": rows}, indent=2), encoding="utf-8")
     # the home page's "Measured, not claimed" figures come from the latest run
     site = ROOT.parent / "frontend" / "src" / "routes" / "landing" / "metrics.json"
-    if site.parent.is_dir():
+    if site.parent.is_dir() and not args.no_site:
         site.write_text(json.dumps({"run": stamp, "questions": len(rows), **s}, indent=2), encoding="utf-8")
     with open(out / f"{stamp}.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))

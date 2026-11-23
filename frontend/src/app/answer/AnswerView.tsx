@@ -85,6 +85,12 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
       {answer.conflicts_pending && (
         <p className={styles.readAs} role="status">{tr('Verified. Still checking the documents for conflicting clauses; any found will be flagged here.')}</p>
       )}
+      {!!answer.differs_across?.length && answer.differs_across.length > 1 && (
+        <p className={styles.readAs} role="note">
+          {tr('This draws on {n} different policies ({names}). Their terms differ by design; a difference between them is a comparison, not a conflict.',
+            { n: answer.differs_across.length, names: answer.differs_across.join(', ') })}
+        </p>
+      )}
       {abstained && answer.abstention && (
         <Abstention answer={answer} cropFor={cropFor} selectedSentence={selectedSentence} onCite={selectCitation} />
       )}

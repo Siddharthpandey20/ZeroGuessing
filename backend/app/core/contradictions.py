@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.amendments import chain_keys, key
 from app.core.normalise import Value, conflicts
+from app.core.products import products, related
 from app.core.retrieve import Evidence
 from app.llm.gemini import get_llm
 from app.models import Chunk, Clause, Contradiction, Document, Sentence
@@ -128,11 +129,19 @@ async def plan_evidence_check(session: AsyncSession, evidence: list[Evidence], v
         doc_of = dict((await session.execute(select(Sentence.id, Sentence.document_id).where(Sentence.id.in_(other)))).all())
         scope = set(doc_ids)
         known = [c for c in known if doc_of.get(c.sentence_a) in scope and doc_of.get(c.sentence_b) in scope]
+    if known:  # an alert stored before product scoping, between two different products: no longer a conflict
+        both = {s for c in known for s in (c.sentence_a, c.sentence_b)}
+        doc_of = dict((await session.execute(select(Sentence.id, Sentence.document_id).where(Sentence.id.in_(both)))).all())
+        kprods = await products(session, set(doc_of.values()))
+        known = [c for c in known if related(kprods, doc_of.get(c.sentence_a), doc_of.get(c.sentence_b))]
     known_pairs = {frozenset((c.sentence_a, c.sentence_b)) for c in known}
     pairs = []
     current = [e for e in evidence if e.status == "current"]
+    prods = await products(session, {e.doc_id for e in current})
     for a, b in combinations(current, 2):
         if a.clause_id == b.clause_id or frozenset((a.sentence_id, b.sentence_id)) in known_pairs:
+            continue
+        if not related(prods, a.doc_id, b.doc_id):  # different products differ by design: not a conflict
             continue
         if frozenset((key(a.doc_id, a.clause_ref), key(b.doc_id, b.clause_ref))) in links:
             continue
@@ -151,11 +160,16 @@ async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: 
     # alerts whose sentences were replaced by a re-ingest can never be shown again: drop them
     live = select(Sentence.id)
     await session.execute(delete(Contradiction).where(or_(Contradiction.sentence_a.not_in(live), Contradiction.sentence_b.not_in(live))))
+    await prune_unrelated(session)
     links = await chain_keys(session)
     cand: dict[frozenset, tuple[str, float, dict, dict]] = {}
+    active = (await session.execute(select(Document.id).where(Document.active.is_(True)))).scalars().all()
+    prods = await products(session, active)
 
     def consider(a: dict, b: dict) -> None:
         if a["sentence_id"] == b["sentence_id"] or a["clause_ref"].startswith("_") or b["clause_ref"].startswith("_"):
+            return
+        if not related(prods, a["doc_id"], b["doc_id"]):
             return
         if a["doc_id"] == b["doc_id"] and a["clause_ref"] == b["clause_ref"]:
             return
@@ -207,7 +221,7 @@ async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: 
         if not rare:
             continue
         for b in every:
-            if b["doc_id"] == doc_id or rule_pairs >= 15:
+            if b["doc_id"] == doc_id or rule_pairs >= 15 or not related(prods, a["doc_id"], b["doc_id"]):
                 continue
             if not (rare & toks[b["sentence_id"]]) or bool(NEGATED.search(a["text"])) == bool(NEGATED.search(b["text"])):
                 continue
@@ -235,6 +249,22 @@ async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: 
                 found += 1
     await session.commit()
     return found
+
+
+async def prune_unrelated(session: AsyncSession) -> int:
+    """Delete stored alerts between documents now known to be different products (made before product scoping)."""
+    rows = (await session.execute(select(Contradiction.id, Contradiction.sentence_a, Contradiction.sentence_b)
+                                  .where(Contradiction.scope == "cross"))).all()
+    if not rows:
+        return 0
+    sids = {s for _, a, b in rows for s in (a, b)}
+    doc_of = dict((await session.execute(select(Sentence.id, Sentence.document_id).where(Sentence.id.in_(sids)))).all())
+    prods = await products(session, set(doc_of.values()))
+    gone = [cid for cid, a, b in rows if a in doc_of and b in doc_of and not related(prods, doc_of[a], doc_of[b])]
+    if gone:
+        await session.execute(delete(Contradiction).where(Contradiction.id.in_(gone)))
+        await session.commit()
+    return len(gone)
 
 
 async def _sentences(session: AsyncSession, ids: list[str]) -> list[dict]:

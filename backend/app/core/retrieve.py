@@ -114,12 +114,35 @@ async def _fts(session: AsyncSession, terms: list[str], n: int, doc_ids: list[st
     return [(r.id, float(r.r)) for r in rows]
 
 
-def rrf(*lists: list[tuple[str, float]], k: int = 60) -> list[str]:
+def rrf(*lists: list[tuple[str, float]], k: int = 60, weights: list[float] | None = None) -> list[str]:
     score: dict[str, float] = {}
-    for lst in lists:
+    for n, lst in enumerate(lists):
+        w = weights[n] if weights else 1.0
         for rank, (cid, _) in enumerate(lst):
-            score[cid] = score.get(cid, 0) + 1 / (k + rank + 1)
+            score[cid] = score.get(cid, 0) + w / (k + rank + 1)
     return sorted(score, key=score.get, reverse=True)
+
+
+async def rare_terms(session: AsyncSession, terms: list[str], max_df: float, doc_ids: list[str] | None = None) -> list[str]:
+    """Question words that appear in at most `max_df` of the searched chunks. In a library of similar documents
+    (ten health policies) words like 'policy', 'days' or the insurer's name are in nearly every chunk and only add
+    noise to the keyword ranking; clause numbers, amounts and specific terms are rare and stay."""
+    terms = [t for t in terms if R_SAFE.sub("", t)]
+    if not terms:
+        return []
+    base = _scoped(select(func.count()).select_from(Chunk).join(Document, Document.id == Chunk.document_id)
+                   .where(Document.active.is_(True)), doc_ids)
+    total = (await session.execute(base)).scalar_one()
+    if not total:
+        return terms
+    cols = [func.count().filter(Chunk.tsv.op("@@")(func.to_tsquery("simple", tsquery([t])))) for t in terms]
+    counts = (await session.execute(_scoped(select(*cols).select_from(Chunk).join(Document, Document.id == Chunk.document_id)
+                                             .where(Document.active.is_(True)), doc_ids))).one()
+    # floor of 3 chunks: in a tiny library every word is in >10% of chunks, and none of them is noise
+    return [t for t, c in zip(terms, counts) if c <= max(3, max_df * total)]
+
+
+R_SAFE = re.compile(r"[^\w.]")
 
 
 async def retrieve(session: AsyncSession, question: str, as_of: date, search_text: str | None = None,
@@ -133,8 +156,10 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
         dense = await _dense(session, qvec, 50, doc_ids)
     except Exception as e:  # keyword search still answers if embeddings are unavailable
         log.warning("dense retrieval unavailable: %s", e)
-    fts = await _fts(session, terms, 50, doc_ids)
-    ranked = rrf(dense, fts, k=s.rrf_k)[: s.retrieve_k]
+    # keyword search on the informative words only, and with less say than meaning-based search (measured on the
+    # 127-question insurance set: Hit@1 52% -> 76%, Hit@5 87% -> 99%; demo set unchanged or better)
+    fts = await _fts(session, await rare_terms(session, terms, s.fts_max_df, doc_ids), 50, doc_ids)
+    ranked = rrf(dense, fts, k=s.rrf_k, weights=[1.0, s.fts_weight])[: s.retrieve_k]
     docs_searched = (await session.execute(_scoped(select(func.count()).select_from(Document).where(Document.active.is_(True)), doc_ids))).scalar_one()
 
     chunks = {c.id: c for c in (await session.execute(select(Chunk).where(Chunk.id.in_(ranked)))).scalars()} if ranked else {}

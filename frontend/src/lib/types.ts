@@ -114,6 +114,8 @@ export interface Answer {
   abstention: Abstention | null
   /** Shown before the conflict check finished; an update with any conflicts follows in the same stream. */
   conflicts_pending?: boolean
+  /** The claims come from different products (e.g. two insurers' policies): their terms differ by design, not a conflict. */
+  differs_across?: string[]
   timings_ms: Record<string, number>
   /** every step the pipeline took, what it read and how long each took ("show work") */
   trace?: TraceStep[]

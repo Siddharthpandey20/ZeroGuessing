@@ -24,8 +24,10 @@ class Settings(BaseSettings):
     # Gemini "thinking" per call: MINIMAL | LOW | MEDIUM | HIGH, empty = the model's default. Less thinking is faster;
     # measure answer quality (scripts.run_eval) before lowering it. The draft has its own knob, the other calls
     # (judge, contradiction confirm, translation, amendment extraction, intent) share LLM_THINKING.
-    llm_thinking: str = ""
-    llm_thinking_draft: str = ""
+    # Unset, Gemini 3 thinks at HIGH. The draft gets MEDIUM (it composes the answer); the other calls are narrow
+    # yes/no or rewrite tasks and get LOW. All configured models accept both levels (checked 2026-11-23).
+    llm_thinking: str = "LOW"
+    llm_thinking_draft: str = "MEDIUM"
 
     database_url: str = "postgresql+asyncpg://zeroguess:zeroguess@localhost:5433/zeroguess"
     api_key: str = "change-me"  # service/script access (X-API-Key, or the /auth/session cookie); acts as admin
@@ -66,6 +68,8 @@ class Settings(BaseSettings):
     # verification / retrieval thresholds (tuned on the eval set)
     retrieve_k: int = 20
     rrf_k: int = 60
+    fts_weight: float = 0.3  # keyword ranks' weight in the fusion (meaning-based search = 1.0)
+    fts_max_df: float = 0.10  # keyword search ignores words found in more than this share of the searched chunks
     min_dense_score: float = 0.35  # abstention gate: best cosine below this -> no proof
 
     max_upload_mb: int = 40

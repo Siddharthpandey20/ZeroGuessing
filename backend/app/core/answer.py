@@ -17,8 +17,10 @@ from app.core.amendments import key
 from app.core.contradictions import alert_view, confirm_pairs, finish_evidence_check, plan_evidence_check
 from app.core.intent import chat_reply, classify, is_followup, overview, resolve_followup
 from app.core.normalise import Value
+from app.core.products import products, related
 from app.core.retrieve import RetrievalResult, retrieve
 from app.core.verify import VerifiedClaim, faithfulness, verify
+from app.llm import usage
 from app.llm.gemini import get_llm
 from app.models import Amendment, AnswerCache, Contradiction, Document, Sentence
 from app.schemas import Draft, QueryTranslation, Translation
@@ -45,12 +47,22 @@ TRANSLATE_SYSTEM = ("Translate each English sentence into natural Hindi. Keep ev
                     "and clause/paragraph reference exactly as in the English. Return the same number of items in order.")
 
 
+EVIDENCE_HEADER = ("EVIDENCE (each line comes from the document named in the '##' heading above it; "
+                   "a line with no status is CURRENT):")
+
+
 def _evidence_block(r: RetrievalResult) -> str:
-    lines = []
+    """The numbered evidence, in retrieval (relevance) order. Same information as one label per line, fewer tokens:
+    the document title is written once per run of lines from that document instead of on every line, and the status
+    only when it is not CURRENT (EVIDENCE_HEADER tells the model so)."""
+    lines, doc = [], None
     for e in r.evidence:
-        tag = e.status_note if e.status != "current" else "CURRENT"
+        if e.doc_id != doc:
+            doc = e.doc_id
+            lines.append(f"## {e.doc_title}")
         kind = "table row" if e.is_table_row else f"clause {e.clause_ref}"
-        lines.append(f"[{e.eid}] ({e.doc_title} | {kind} | p.{e.page} | {tag}) {e.text}")
+        tag = f" | {e.status_note}" if e.status != "current" else ""
+        lines.append(f"[{e.eid}] ({kind} | p.{e.page}{tag}) {e.text}")
     return "\n".join(lines)
 
 
@@ -98,6 +110,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         return {"type": "trace", "step": st}
 
     s = get_settings()
+    meter = usage.start()  # tokens billed for this answer (all its model calls, the parallel conflict check included)
     asked = question
     kind = classify(question)
     if kind in ("smalltalk", "help"):
@@ -137,7 +150,8 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{await corpus_version(session)}".encode()).hexdigest()
     if use_cache and s.answer_cache and (hit := await session.get(AnswerCache, cache_key)):
         # the same question on the same documents and date: the stored, already-verified answer, with its own trace
-        yield {"type": "answer", "answer": {**hit.answer, "cached": True}}
+        # tokens: what THIS request cost (a follow-up rewrite at most), not what the stored answer cost when made
+        yield {"type": "answer", "answer": {**hit.answer, "cached": True, "tokens": meter.summary()}}
         return
 
     lang = "hi" if DEVANAGARI.search(question) else "en"
@@ -171,7 +185,8 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         yield step("gate", t, passed=False, best_score=round(r.best_dense, 3) if r.best_dense is not None else None,
                    threshold=s.min_dense_score)
         ans = {**base, **_abstain(r, [], ["no passage in the loaded documents is related to this question"]),
-               "timings_ms": {**timings, "total": int((time.perf_counter() - t0) * 1000)}, "trace": trace}
+               "timings_ms": {**timings, "total": int((time.perf_counter() - t0) * 1000)}, "trace": trace,
+               "tokens": meter.summary()}
         yield {"type": "answer", "answer": ans}
         return
 
@@ -181,10 +196,12 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     for srow in (await session.execute(select(Sentence.id, Sentence.values).where(Sentence.id.in_([e.sentence_id for e in r.evidence])))).all():
         values[srow.id] = [Value(v["type"], v["value"], v.get("period")) for v in srow.values]
     known, pairs = await plan_evidence_check(session, r.evidence, values, doc_ids=doc_ids)
+    prods = await products(session, {e.doc_id for e in r.evidence})
+    titles = {e.doc_id: e.doc_title for e in r.evidence}
     confirming = asyncio.create_task(confirm_pairs(pairs))
 
     yield {"type": "stage", "stage": "drafting", "evidence": len(r.evidence)}
-    prompt = f"AS-OF DATE: {as_of.isoformat()}\nQUESTION: {q_en}\n\nEVIDENCE:\n{_evidence_block(r)}"
+    prompt = f"AS-OF DATE: {as_of.isoformat()}\nQUESTION: {q_en}\n\n{EVIDENCE_HEADER}\n{_evidence_block(r)}"
     try:
         draft = await get_llm().generate_json(Draft, prompt, DRAFT_SYSTEM, thinking=s.llm_thinking_draft or None)
     except Exception as e:
@@ -228,8 +245,17 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         out["faithfulness"] = faithfulness(claims)  # conflicted counts as backed, so this never changes on the update
         out["calculations"] = [c.calculation for c in claims if c.calculation]
         out["contradictions"] = await alert_view(session, relevant)
+        # claims drawn from different products (two insurers' policies): their terms differ by design. Say so
+        # neutrally, so a reader does not take the difference for a conflict nor for an error.
+        docs = list(dict.fromkeys(c["doc_id"] for vc in shown for c in vc.citations if c.get("doc_id")))
+        heads: list[str] = []  # one document per product
+        for d in docs:
+            if all(not related(prods, d, h) for h in heads):
+                heads.append(d)
+        out["differs_across"] = [titles.get(d, "") for d in heads] if len(heads) > 1 else []
         out["amendment_chains"] = _chains(r)
         out["timings_ms"] = {**timings, "total": int((time.perf_counter() - t0) * 1000)}
+        out["tokens"] = meter.summary()  # the early answer may lack the conflict check's call; the update has it
         out["trace"] = list(trace)
         out["cached"] = False
         out["conflicts_pending"] = pending

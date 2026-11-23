@@ -55,9 +55,10 @@ def _metrics(ranked: list[bool], n_rel: int) -> dict:
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--chat", default="", help="chat whose documents to search (default: the latest eval chat)")
+    ap.add_argument("--gold", default="eval/gold.jsonl", help="question file, relative to backend/")
     args = ap.parse_args()
     s = get_settings()
-    items = [json.loads(line) for line in (ROOT / "eval" / "gold.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    items = [json.loads(line) for line in (ROOT / args.gold).read_text(encoding="utf-8").splitlines() if line.strip()]
     items = [i for i in items if i.get("expected_citations")]
 
     async with SessionLocal() as session:
@@ -76,8 +77,9 @@ async def main() -> None:
             n_rel = sum(_relevant(t, r, gold) for t, r in meta.values())
             qvec = await get_llm().embed_query(it["q"])
             dense = await R._dense(session, qvec, 50, doc_ids)
-            kw = await R._fts(session, R.key_terms(it["q"]), 50, doc_ids)
-            hybrid = [(c, 0.0) for c in R.rrf(dense, kw, k=s.rrf_k)[:50]]
+            # the same keyword query and fusion weights as the app (app/core/retrieve.py)
+            kw = await R._fts(session, await R.rare_terms(session, R.key_terms(it["q"]), s.fts_max_df, doc_ids), 50, doc_ids)
+            hybrid = [(c, 0.0) for c in R.rrf(dense, kw, k=s.rrf_k, weights=[1.0, s.fts_weight])[:50]]
             for name, lst in (("dense", dense), ("keyword", kw), ("hybrid", hybrid)):
                 per[name].append(_metrics([_relevant(*meta[c], gold) for c, _ in lst if c in meta], n_rel))
             # what the drafter actually sees: the evidence sentences after budgeting and amendment expansion
