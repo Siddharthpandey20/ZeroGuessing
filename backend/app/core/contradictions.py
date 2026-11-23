@@ -1,11 +1,13 @@
 """Contradiction detection (plan Q6). Bounded candidate pairs -> one batched LLM confirmation.
 Amendment-linked clauses are supersession, not contradiction, and are excluded."""
 
+import asyncio
 import logging
 import re
 from itertools import combinations
 
 from sqlalchemy import delete, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.amendments import chain_keys, key
@@ -13,7 +15,7 @@ from app.core.normalise import Value, conflicts
 from app.core.products import products, related
 from app.core.retrieve import Evidence
 from app.llm.gemini import get_llm
-from app.models import Chunk, Clause, Contradiction, Document, Sentence
+from app.models import Chunk, Clause, Contradiction, Document, PairCheck, Sentence
 from app.schemas import ContraOut
 
 log = logging.getLogger(__name__)
@@ -31,6 +33,9 @@ SYSTEM = (
     "incompatible numbers, dates, rules or eligibility for the SAME subject under the SAME conditions. "
     "Different products, borrower types, rate types or conditions are NOT a conflict. An explicit amendment is NOT a conflict."
 )
+
+
+SCAN_PARALLEL = 3  # model calls in flight at once during an upload's scan (kept low for API rate limits)
 
 
 def _content(text: str) -> set[str]:
@@ -81,6 +86,28 @@ async def _store(session: AsyncSession, a: dict, b: dict, it, source: str) -> Co
     return c
 
 
+async def _already_checked(session: AsyncSession, pairs: list[tuple[str, str]]) -> set[frozenset]:
+    """The pairs (by sentence id) the model has judged before, whatever it said."""
+    if not pairs:
+        return set()
+    ids = {i for p in pairs for i in p}
+    rows = (await session.execute(select(PairCheck.sentence_a, PairCheck.sentence_b)
+                                  .where(PairCheck.sentence_a.in_(ids), PairCheck.sentence_b.in_(ids)))).all()
+    return {frozenset(r) for r in rows}
+
+
+async def _record(session: AsyncSession, part: list[tuple[dict, dict]], items: list) -> None:
+    """Remember each verdict the model actually returned. A failed or missing verdict is not recorded: that pair is
+    asked again next time rather than silently treated as 'no conflict'."""
+    rows = {}
+    for it in items:
+        if 0 <= it.idx < len(part):
+            sa, sb = sorted([part[it.idx][0]["sentence_id"], part[it.idx][1]["sentence_id"]])
+            rows[(sa, sb)] = {"sentence_a": sa, "sentence_b": sb, "conflict": bool(it.conflict and it.same_subject)}
+    if rows:
+        await session.execute(insert(PairCheck).values(list(rows.values())).on_conflict_do_nothing())
+
+
 def _ev_dict(e: Evidence) -> dict:
     return {"sentence_id": e.sentence_id, "doc_id": e.doc_id, "doc_title": e.doc_title, "clause_ref": e.clause_ref,
             "heading": e.heading_path, "text": e.text}
@@ -109,6 +136,7 @@ async def confirm_pairs(pairs: list) -> list | None:
 async def finish_evidence_check(session: AsyncSession, known: list[Contradiction], pairs: list, items: list | None) -> list[Contradiction]:
     if not pairs or items is None:
         return known
+    await _record(session, [(_ev_dict(a), _ev_dict(b)) for _, a, b in pairs], items)
     for it in items:
         if 0 <= it.idx < len(pairs) and it.conflict and it.same_subject:
             _, a, b = pairs[it.idx]
@@ -148,6 +176,10 @@ async def plan_evidence_check(session: AsyncSession, evidence: list[Evidence], v
         kind = candidate(a.text, values.get(a.sentence_id, []), a.heading_path, b.text, values.get(b.sentence_id, []), b.heading_path)
         if kind:
             pairs.append((kind, a, b))
+    # pairs the upload scan (or an earlier question) already judged are settled: a conflict among them is in `known`,
+    # the rest were judged consistent. Only never-seen pairs go to the model, so usually there is no model call at all.
+    seen = await _already_checked(session, [(a.sentence_id, b.sentence_id) for _, a, b in pairs])
+    pairs = [p for p in pairs if frozenset((p[1].sentence_id, p[2].sentence_id)) not in seen]
     pairs.sort(key=lambda p: p[0] != "number")
     return known, pairs[:max_pairs]
 
@@ -233,16 +265,26 @@ async def scan_document(session: AsyncSession, doc_id: str, k: int = 12, batch: 
             cand[pk] = ("rule", _overlap(f"{a['heading']} {a['text']}", f"{b['heading']} {b['text']}"), a, b)
             rule_pairs += 1
 
-    ranked = sorted(cand.values(), key=lambda t: (t[0] != "number", -t[1]))
+    seen = await _already_checked(session, [tuple(pk) for pk in cand])
+    ranked = sorted((v for pk, v in cand.items() if pk not in seen), key=lambda t: (t[0] != "number", -t[1]))
     pairs = [(a, b) for _, _, a, b in ranked[:60]]
+    parts = [pairs[i:i + batch] for i in range(0, len(pairs), batch)]
+    gate = asyncio.Semaphore(SCAN_PARALLEL)
+
+    async def ask(part: list[tuple[dict, dict]]) -> list | None:
+        async with gate:
+            try:
+                return await _confirm(part)
+            except Exception as e:
+                log.warning("scan confirm failed: %s", e)
+                return None
+
+    # the batches are independent model calls: run them together (the DB writes stay sequential on this session)
     found = 0
-    for i in range(0, len(pairs), batch):
-        part = pairs[i:i + batch]
-        try:
-            items = await _confirm(part)
-        except Exception as e:
-            log.warning("scan confirm failed: %s", e)
+    for part, items in zip(parts, await asyncio.gather(*(ask(p) for p in parts))):
+        if items is None:
             continue
+        await _record(session, part, items)
         for it in items:
             if 0 <= it.idx < len(part) and it.conflict and it.same_subject:
                 await _store(session, *part[it.idx], it, "scan")
