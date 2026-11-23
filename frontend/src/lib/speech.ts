@@ -24,7 +24,37 @@ const ctor = (): RecognitionCtor | null => {
 export const canDictate = () => ctor() !== null
 export const canSpeak = () => typeof window !== 'undefined' && 'speechSynthesis' in window
 
-export type SpeechLang = 'en-IN' | 'hi-IN'
+/**
+ * The language you speak and hear: English, Hindi or Chhattisgarhi. It is also the language the answer is written in.
+ * No browser has a Chhattisgarhi recogniser or voice, so Chhattisgarhi listens and speaks with the Hindi ones: both
+ * are written in Devanagari and close enough for dictation and reading aloud, while the answer itself is written in
+ * Chhattisgarhi by the backend.
+ */
+export type VoiceLang = 'en' | 'hi' | 'hne'
+export const VOICE_LANGS: VoiceLang[] = ['en', 'hi', 'hne']
+export const VOICE_LABEL: Record<VoiceLang, string> = { en: 'EN', hi: 'हिं', hne: 'छग' }
+export const VOICE_NAME: Record<VoiceLang, string> = { en: 'English', hi: 'Hindi', hne: 'Chhattisgarhi' }
+const BCP47: Record<VoiceLang, string> = { en: 'en-IN', hi: 'hi-IN', hne: 'hi-IN' }
+
+const PREF = 'zg-voice-lang'
+/** The last language picked, else the interface's (a Hindi interface listens in Hindi). */
+export function savedVoiceLang(uiHindi: boolean): VoiceLang {
+  try {
+    const v = localStorage.getItem(PREF)
+    if (v === 'en' || v === 'hi' || v === 'hne') return v
+  } catch {
+    /* private mode */
+  }
+  return uiHindi ? 'hi' : 'en'
+}
+export function saveVoiceLang(l: VoiceLang) {
+  try {
+    localStorage.setItem(PREF, l)
+  } catch {
+    /* private mode: the choice lasts for this visit */
+  }
+}
+const asVoiceLang = (l: string | undefined | null): VoiceLang => (l === 'hi' || l === 'hne' ? l : 'en')
 
 const ERRORS: Record<string, string> = {
   'not-allowed': 'Microphone access is blocked. Allow it in the browser’s site settings.',
@@ -32,6 +62,7 @@ const ERRORS: Record<string, string> = {
   'no-speech': 'No speech was heard. Try again a little closer to the microphone.',
   'audio-capture': 'No microphone was found.',
   network: 'Dictation needs an internet connection in this browser.',
+  'language-not-supported': 'This browser cannot listen in this language. Try Chrome or Edge.',
 }
 
 /**
@@ -41,7 +72,7 @@ const ERRORS: Record<string, string> = {
  * or after `idleMs` if nothing is said at all.
  */
 export function dictate(
-  lang: SpeechLang,
+  lang: VoiceLang,
   onText: (text: string) => void,
   onEnd: (error?: string) => void,
   { pauseMs = 2500, idleMs = 8000 }: { pauseMs?: number; idleMs?: number } = {},
@@ -52,7 +83,7 @@ export function dictate(
     return () => {}
   }
   const r = new R()
-  r.lang = lang
+  r.lang = BCP47[lang]
   r.interimResults = true
   r.continuous = true
   let failed: string | undefined
@@ -85,42 +116,145 @@ export function dictate(
   }
 }
 
+const NO_PROOF: Record<VoiceLang, string> = {
+  en: "I don't have proof for this.",
+  hi: 'इसका प्रमाण दस्तावेज़ों में नहीं मिला। कारण स्क्रीन पर देखें।',
+  hne: 'एकर परमान दस्तावेज मन म नइ मिलिस। कारन स्क्रीन म देखव।',
+}
+const DISAGREE: Record<VoiceLang, string> = {
+  en: 'Note: the documents disagree on this. Compare the quotes on screen.',
+  hi: 'ध्यान दें: इस बात पर दस्तावेज़ों में विरोधाभास है। स्क्रीन पर दोनों उद्धरण देखें।',
+  hne: 'धियान देवव: ए बात म दस्तावेज मन म फरक हावय। स्क्रीन म दूनों उद्धरण देखव।',
+}
+
 /** What "Listen" reads: the verified answer only (blocked claims are never spoken), or the abstention. */
-export function spokenAnswer(a: Answer): { text: string; lang: SpeechLang } {
-  const hindi = a.lang === 'hi'
-  const lang: SpeechLang = hindi ? 'hi-IN' : 'en-IN'
+export function spokenAnswer(a: Answer): { text: string; lang: VoiceLang } {
+  const lang = asVoiceLang(a.lang)
+  const translated = lang !== 'en'
   if (a.status === 'chat') return { text: a.reply ?? '', lang }
   if (a.status === 'abstained') {
-    const missing = a.abstention?.missing?.length ? ` ${a.abstention.missing.join('. ')}.` : ''
-    return { text: `I don't have proof for this.${missing}`, lang: 'en-IN' }
+    // the reasons are written in English: read them out only in English, otherwise point to the screen
+    const missing = !translated && a.abstention?.missing?.length ? ` ${a.abstention.missing.join('. ')}.` : ''
+    return { text: `${NO_PROOF[lang]}${missing}`, lang }
   }
   const said = a.claims
     .filter((c) => c.verdict === 'supported' || c.verdict === 'conflicted')
-    .map((c) => (hindi && c.text_hi ? c.text_hi : c.text).trim())
-  if (a.contradictions?.length) said.push(hindi ? 'दस्तावेज़ों में एक विरोधाभास है।' : 'Note: the documents disagree on this. Compare the quotes on screen.')
+    .map((c) => (translated && c.text_hi ? c.text_hi : c.text).trim())
+  if (a.contradictions?.length) said.push(DISAGREE[lang])
   return { text: said.join(' '), lang }
 }
 
-let current: SpeechSynthesisUtterance | null = null
+/** Voices load after the page does: Chrome returns an empty list at first and fires `voiceschanged` later. */
+function loadVoices(): Promise<SpeechSynthesisVoice[]> {
+  const now = window.speechSynthesis.getVoices()
+  if (now.length) return Promise.resolve(now)
+  return new Promise((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      window.speechSynthesis.removeEventListener('voiceschanged', finish)
+      resolve(window.speechSynthesis.getVoices())
+    }
+    window.speechSynthesis.addEventListener('voiceschanged', finish)
+    window.setTimeout(finish, 2000)
+  })
+}
+if (canSpeak()) void loadVoices() // start loading early, so the first answer does not wait
 
-/** Read text aloud, replacing anything already playing. `onEnd` runs when it finishes or is stopped. */
-export function speak(text: string, lang: SpeechLang, onEnd: () => void) {
-  if (!canSpeak()) return onEnd()
-  window.speechSynthesis.cancel()
-  const u = new SpeechSynthesisUtterance(text.replace(/₹/g, 'rupees '))
-  u.lang = lang
-  const voices = window.speechSynthesis.getVoices()
-  const voice = voices.find((v) => v.lang === lang) ?? voices.find((v) => v.lang.startsWith(lang.slice(0, 2)))
-  if (voice) u.voice = voice
-  u.onend = u.onerror = () => {
-    if (current === u) current = null
-    onEnd()
+const tag = (v: SpeechSynthesisVoice) => v.lang.replace('_', '-').toLowerCase()
+
+/** The best voice for a language: natural (neural) voices first, then ones on this device, then any. */
+function pickVoice(voices: SpeechSynthesisVoice[], lang: VoiceLang): SpeechSynthesisVoice | null {
+  const want = BCP47[lang].toLowerCase()
+  const base = want.slice(0, 2)
+  const fits = voices.filter((v) => tag(v) === want || tag(v) === base || tag(v).startsWith(`${base}-`))
+  if (!fits.length) return null
+  const score = (v: SpeechSynthesisVoice) =>
+    (tag(v) === want ? 4 : 0) + (/natural|neural|online/i.test(v.name) ? 2 : 0) + (v.localService ? 1 : 0)
+  return [...fits].sort((a, b) => score(b) - score(a))[0]
+}
+
+/**
+ * Short pieces, one sentence (or part of a long one) each. Chrome's network voices, the only Hindi voice on many
+ * Windows machines, stop after about 15 seconds of speech and never report the end, so one long utterance went silent
+ * half-way and the voice conversation never heard it finish.
+ */
+function pieces(text: string, max = 180): string[] {
+  const out: string[] = []
+  for (const sentence of text.split(/(?<=[.!?।])\s+/)) {
+    let rest = sentence.trim()
+    while (rest.length > max) {
+      const cut = Math.max(rest.lastIndexOf(', ', max), rest.lastIndexOf(' ', max))
+      const at = cut > 40 ? cut + 1 : max
+      out.push(rest.slice(0, at).trim())
+      rest = rest.slice(at).trim()
+    }
+    if (rest) out.push(rest)
   }
-  current = u
-  window.speechSynthesis.speak(u)
+  return out
+}
+
+const RUPEES: Record<VoiceLang, string> = { en: 'rupees ', hi: 'रुपये ', hne: 'रुपिया ' }
+const MISSING_VOICE =
+  'No Hindi voice is installed in this browser, so the answer cannot be read aloud (Chhattisgarhi is read with a Hindi voice). ' +
+  'Use Chrome or Edge, or add Hindi in Windows Settings › Time & language › Speech.'
+
+let session = 0
+let queue: SpeechSynthesisUtterance[] = [] // kept referenced: Chrome drops the end event of a garbage-collected utterance
+
+/**
+ * Read text aloud, replacing anything already playing. `onEnd` runs when it finishes or is stopped, with a message
+ * when it could not be read at all (no voice for the language).
+ */
+export function speak(text: string, lang: VoiceLang, onEnd: (problem?: string) => void) {
+  if (!canSpeak() || !text.trim()) return onEnd()
+  const synth = window.speechSynthesis
+  const mine = ++session
+  synth.cancel()
+  queue = []
+  void loadVoices().then((voices) => {
+    if (mine !== session) return onEnd() // stopped, or replaced by another answer, while voices were loading
+    const voice = pickVoice(voices, lang)
+    // a Devanagari answer handed to an English voice is skipped in silence: say why instead
+    if (!voice && lang !== 'en' && voices.length) return onEnd(MISSING_VOICE)
+    const parts = pieces(text.replace(/₹\s?/g, RUPEES[lang]))
+    if (!parts.length) return onEnd()
+    let left = parts.length
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      window.clearInterval(nudge)
+      if (mine === session) queue = []
+      onEnd()
+    }
+    // Chrome can leave the queue paused between pieces: keep it moving until it is done
+    const nudge = window.setInterval(() => {
+      if (mine !== session) return finish()
+      if (synth.paused) synth.resume()
+    }, 3000)
+    queue = parts.map((p) => {
+      const u = new SpeechSynthesisUtterance(p)
+      u.lang = BCP47[lang]
+      if (voice) u.voice = voice
+      u.onend = u.onerror = () => {
+        left -= 1
+        if (left <= 0 || mine !== session) finish()
+      }
+      return u
+    })
+    synth.resume()
+    // speaking straight after cancel() is sometimes dropped by Chrome: give the cancel a moment
+    window.setTimeout(() => {
+      if (mine !== session) return finish()
+      for (const u of queue) synth.speak(u)
+    }, 60)
+  })
 }
 
 export function stopSpeaking() {
+  session += 1
+  queue = []
   if (canSpeak()) window.speechSynthesis.cancel()
-  current = null
 }

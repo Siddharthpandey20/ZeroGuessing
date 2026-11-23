@@ -39,6 +39,20 @@ export const usePending = (chatId: string | undefined) =>
 
 export const dismissPending = (chatId: string) => set(chatId, null)
 
+// the open stream of each chat's answer, so Stop can close it (the server then records the turn as stopped)
+const controllers = new Map<string, AbortController>()
+
+/** Stop the answer being produced in this chat. What was stopped stays in the chat as a stopped turn. */
+export function stopAnswer(qc: QueryClient, chatId: string) {
+  const c = controllers.get(chatId)
+  if (!c) return
+  controllers.delete(chatId)
+  c.abort()
+  set(chatId, null)
+  // the server marks the turn stopped as soon as it sees the stream close: refresh once it has
+  for (const ms of [300, 1500]) window.setTimeout(() => void qc.invalidateQueries({ queryKey: ['chat', chatId] }), ms)
+}
+
 let lastFresh: string | null = null
 export const takeFresh = () => lastFresh
 
@@ -54,9 +68,13 @@ export async function runAnswer(
   const { chatId } = opts
   let p: Pending = { chatId, turn: opts.turn, question: opts.question, asOf: opts.asOf, stage: null, info: {}, trace: [], startedAt: Date.now() }
   set(chatId, p)
+  controllers.get(chatId)?.abort() // one answer at a time per chat
+  const ctl = new AbortController()
+  controllers.set(chatId, ctl)
+  const stopped = () => ctl.signal.aborted
   let shown = false // an early answer is on screen; the stream stays open for its conflict-check update
   try {
-    for await (const ev of streamEvents(opts.path, opts.body, { method: opts.method })) {
+    for await (const ev of streamEvents(opts.path, opts.body, { method: opts.method, signal: ctl.signal })) {
       const d = ev.data as Record<string, unknown>
       if (ev.event === 'stage') {
         p = { ...p, stage: d.stage as Stage, info: { ...p.info, ...(d.evidence ? { evidence: d.evidence as number } : {}), ...(d.claims ? { claims: d.claims as number } : {}) } }
@@ -100,10 +118,13 @@ export async function runAnswer(
     // stream ended without an answer event
     set(chatId, { ...p, error: 'The connection closed before the answer arrived.' })
   } catch (e) {
+    if (stopped()) return // Stop was pressed: stopAnswer already cleared the live view
     if (shown) {
       qc.invalidateQueries({ queryKey: ['chat', chatId] })
       return
     }
     set(chatId, { ...p, error: e instanceof Error ? e.message : 'The request failed.' })
+  } finally {
+    if (controllers.get(chatId) === ctl) controllers.delete(chatId)
   }
 }

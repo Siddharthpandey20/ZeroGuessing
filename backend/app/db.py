@@ -17,6 +17,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS parent_id varchar(32)",
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_lang varchar(4)",
     "CREATE INDEX IF NOT EXISTS ix_messages_parent_id ON messages (parent_id)",
     "ALTER TABLE chats ADD COLUMN IF NOT EXISTS current_message_id varchar(32)",
     # older chats were linear: each turn follows the latest version of the turn before it

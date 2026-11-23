@@ -6,6 +6,7 @@ then (c) one batched strict-judge LLM call for entailment of the claims that sur
 Faithfulness = claims backed by a matching quote / all DRAFT claims (before blocking)."""
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from app.core.calc import compute
@@ -21,8 +22,9 @@ JUDGE_SYSTEM = (
     "evidence ALONE proves it. 'entailed' only if every part of the claim is stated or directly implied by the quotes. "
     "'contradicted' if the quotes state something incompatible. Otherwise 'neutral'. Do not use outside knowledge. "
     "Different conditions or scope (e.g. fixed vs floating rate, individual vs business) mean NOT entailed. "
-    "The label after each quote (document, clause, page, and its status on the as-of date: CURRENT, SUPERSEDED, "
-    "NOT YET EFFECTIVE, DELETED) is part of the evidence. A claim may attribute itself to that source, by its document "
+    "The label after each quote (document, clause, its heading, page, and its status on the as-of date: CURRENT, SUPERSEDED, "
+    "NOT YET EFFECTIVE, DELETED) is part of the evidence: a quote saying 'this clause' or 'this benefit' means the clause "
+    "its heading names. A claim may attribute itself to that source, by its document "
     "name, reference or circular number, clause, or status; such attribution is not a fact the quote text must repeat. "
     "Judge only the substance: the rule, number, date, condition or eligibility the claim asserts."
 )
@@ -46,21 +48,34 @@ class VerifiedClaim:
                 "text_hi": self.text_hi}
 
 
-async def verify(draft: Draft, evidence: list[Evidence], as_of_iso: str) -> list[VerifiedClaim]:
+async def verify(draft: Draft, evidence: list[Evidence], as_of_iso: str, named: list[set[str]] | None = None,
+                 neighbours: dict[str, list[Evidence]] | None = None, question: str = "") -> list[VerifiedClaim]:
+    """`named`: the documents the question names (one set per document/product); a claim must cite one of them.
+    `neighbours`: per cited sentence, the sentences right before/after it in the same clause. A value found only there,
+    or a sentence that leans on them ("In such cases..."), is checked with them and they are shown as quotes too."""
     by_eid = {e.eid: e for e in evidence}
     quotes = {e.eid: e.text for e in evidence}
+    allowed = set().union(*named) if named else set()
+    allowed |= {e.doc_id for e in evidence if e.injected}  # an amending document is part of the named one's answer
+    nb = neighbours or {}
     out: list[VerifiedClaim] = []
     to_judge: list[int] = []
 
     for c in draft.claims:
-        ev = [by_eid[i] for i in c.cite if i in by_eid]
+        ids = list(c.cite) + ([o.cite for o in c.calc.operands] if c.kind == "calc_result" and c.calc else [])
+        ev = list({i: by_eid[i] for i in ids if i in by_eid}.values())
         cites = [e.citation() for e in ev]
         if not ev:
             out.append(VerifiedClaim(c.t, "unsupported", "no valid citation: the cited evidence does not exist", [], c.kind))
             continue
+        if named and not any(e.doc_id in allowed for e in ev):
+            asked = sorted({e.doc_title for e in evidence if e.doc_id in allowed}) or ["the document the question names"]
+            out.append(VerifiedClaim(c.t, "unsupported", f"cites {ev[0].doc_title}, but the question asks about "
+                                     f"{', '.join(asked)}", cites, c.kind))
+            continue
 
         if c.kind == "calc_result" and c.calc:
-            r = compute(c.calc, quotes)
+            r = compute(c.calc, quotes, question)
             op_ev = [by_eid[i] for i in r.operand_citations if i in by_eid]
             stale = [e for e in op_ev if e.status != "current"]
             if not r.ok:
@@ -75,6 +90,15 @@ async def verify(draft: Draft, evidence: list[Evidence], as_of_iso: str) -> list
 
         # (b) values; ignore the as-of date the system itself injected
         missing, conflicting = check_claim_values(c.t, [e.text for e in ev], ignore=[as_of_iso])
+        near = [x for e in ev for x in nb.get(e.sentence_id, []) if x.sentence_id not in {y.sentence_id for y in ev}]
+        near = list({x.sentence_id: x for x in near}.values())
+        use_near = near and any(_leans(e.text) for e in ev)
+        if missing and not conflicting and near:  # the value may sit in the next sentence of the same clause
+            m2, c2 = check_claim_values(c.t, [e.text for e in ev + near], ignore=[as_of_iso])
+            if not m2 and not c2:
+                missing, use_near = [], True
+        if use_near:  # shown and judged with the cited sentence: the quotes shown are exactly what proved the claim
+            cites = cites + [x.citation() for x in near]
         if conflicting:
             out.append(VerifiedClaim(c.t, "contradicted",
                                      f"value(s) {', '.join(_fmt(v) for v in conflicting)} differ from the cited text", cites, c.kind))
@@ -102,7 +126,9 @@ async def _judge(out: list[VerifiedClaim], idxs: list[int], draft: Draft, by_eid
     for n, i in enumerate(idxs):
         claim = out[i]
         q = "\n".join(
-            f'  - "{c["quote"]}" ({c["doc_title"]}, {c["clause_ref"]}, p.{c["page"]}, '
+            # the clause heading tells the judge what "this clause" / "this benefit" in a quote refers to
+            f'  - "{c["quote"]}" ({c["doc_title"]}, {c["clause_ref"]}'
+            + (f', heading: {c["heading"]}' if c.get("heading") else "") + f', p.{c["page"]}, '
             f'{(c.get("status_note") or c.get("status") or "current").upper()})'
             for c in claim.citations)
         blocks.append(f"[{n}] CLAIM: {claim.text}\n  QUOTES:\n{q}")
@@ -124,6 +150,17 @@ async def _judge(out: list[VerifiedClaim], idxs: list[int], draft: Draft, by_eid
             c.verdict, c.reason, c.judge = "contradicted", f"the cited text contradicts this: {it.reason}", it.reason
         else:
             c.verdict, c.reason, c.judge = "unsupported", f"the cited text does not prove this: {it.reason}", it.reason
+
+
+_LEAN = re.compile(r"^(in such|such |the above|however|provided|subject to|in that|in this|"
+                   r"where |which |and |or |but )", re.IGNORECASE)
+
+
+def _leans(text: str) -> bool:
+    """A sentence that cannot stand alone: it refers back ("In such cases..."), starts mid-sentence, is a short
+    fragment, or is cut off. Its neighbours in the clause are needed to read it."""
+    t = text.strip()
+    return bool(not t or t[0].islower() or _LEAN.match(t) or len(t.split()) < 8 or t[-1] not in '.:;)"”')
 
 
 def _fmt(v) -> str:

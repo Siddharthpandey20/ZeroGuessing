@@ -29,6 +29,8 @@ class AskIn(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
     as_of: date | None = None
     input_mode: str = Field("typed", pattern="^(typed|camera|voice)$")
+    # answer language picked in the composer: hi = Hindi, hne = Chhattisgarhi; None/en follows the question's script
+    reply_lang: str | None = Field(None, pattern="^(en|hi|hne)$")
 
 
 class ChatIn(BaseModel):
@@ -98,7 +100,7 @@ async def _scope(session: AsyncSession, chat: Chat) -> list[str] | None:
 
 def _msg(m: Message) -> dict:
     return {"id": m.id, "turn": m.turn, "version": m.version, "question": m.question, "as_of": m.as_of.isoformat(),
-            "input_mode": m.input_mode, "status": m.status, "answer": m.answer, "created_at": m.created_at.isoformat()}
+            "input_mode": m.input_mode, "reply_lang": m.reply_lang, "status": m.status, "answer": m.answer, "created_at": m.created_at.isoformat()}
 
 
 @router.post("/chats", status_code=201)
@@ -219,7 +221,8 @@ async def _run(msg_id: str, use_cache: bool = True):
         try:
             doc_ids = await _scope(session, await session.get(Chat, m.chat_id))
             history = await _history(session, m)
-            async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids, history=history):
+            async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids,
+                                             history=history, reply_lang=m.reply_lang):
                 if ev["type"] in ("answer", "answer_update"):  # an update follows an early answer once conflicts are checked
                     m.answer, m.status = ev["answer"], "done"
                     await session.commit()
@@ -230,12 +233,26 @@ async def _run(msg_id: str, use_cache: bool = True):
                     yield ev
                 else:
                     yield ev
+        except asyncio.CancelledError:
+            # Stop was pressed (the browser closed the stream): record it, so the turn is not left pending forever
+            await asyncio.shield(_mark_stopped(msg_id))
+            raise
         except Exception as e:
             await session.rollback()
             m = await session.get(Message, msg_id)
             m.status, m.answer = "failed", {"error": str(e)}
             await session.commit()
             yield {"type": "error", "message": str(e)}
+
+
+async def _mark_stopped(msg_id: str) -> None:
+    """A stopped answer is kept as a failed turn marked stopped (Run again answers it). One that had already
+    arrived, with only its late conflict check still running, stays as it was."""
+    async with SessionLocal() as s2:
+        m = await s2.get(Message, msg_id)
+        if m is not None and m.status == "pending":
+            m.status, m.answer = "failed", {"error": "You stopped this answer before it finished.", "stopped": True}
+            await s2.commit()
 
 
 async def _respond(msg_id: str, stream: bool, use_cache: bool = True):
@@ -255,7 +272,8 @@ async def _respond(msg_id: str, stream: bool, use_cache: bool = True):
 async def _new_message(session: AsyncSession, chat: Chat, turn: int, version: int, body: AskIn,
                        parent_id: str | None = None) -> Message:
     m = Message(id=_id(), chat_id=chat.id, turn=turn, version=version, question=body.question.strip(),
-                as_of=body.as_of or date.today(), input_mode=body.input_mode, parent_id=parent_id)
+                as_of=body.as_of or date.today(), input_mode=body.input_mode, parent_id=parent_id,
+                reply_lang=body.reply_lang if body.reply_lang in ("hi", "hne") else None)
     session.add(m)
     chat.current_message_id = m.id  # the new message's branch is the one on screen
     chat.updated_at = datetime.now(timezone.utc)
@@ -380,7 +398,8 @@ async def regenerate(chat_id: str, turn: int, stream: bool = Query(True), p: Pri
     """Run a turn's question again as a new version (a new branch from that point, like an edit)."""
     chat = await _chat(session, chat_id, p)
     _, prev = await _on_path(session, chat, turn)
-    m = await _sibling(session, chat, turn, AskIn(question=prev.question, as_of=prev.as_of, input_mode=prev.input_mode))
+    m = await _sibling(session, chat, turn, AskIn(question=prev.question, as_of=prev.as_of, input_mode=prev.input_mode,
+                                                      reply_lang=prev.reply_lang))
     return await _respond(m.id, stream, use_cache=False)  # regenerate = re-run, bypass the answer cache
 
 

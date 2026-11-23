@@ -16,6 +16,11 @@ const DESK = 420 / VB.h // the desk's top edge in the drawing, as a share of its
 const WIDE_PX = 1152 // 72rem: below this the card drops under the headline (see Landing.module.css)
 const CARD_ABOVE_DESK = 10, CARD_BELOW_MARK = 16, MIN_ZOOM = 0.62
 const LINK_TUCK = 3 // the dotted lines end this far under the card's edge, so no sliver of gap shows while it tilts
+// Phones: no opening zoom and no card. The scene stands at its final size in the card's slot (an empty 4:3 frame, see
+// Landing.module.css) and the answers keep playing on its monitor. Same breakpoint as the landing page's phone layout.
+const PHONE = '(max-width: 48rem)'
+const PHONE_CARD_W = 340 // the miniature is laid out this wide, then scaled into the monitor
+const isPhone = () => window.matchMedia(PHONE).matches
 
 interface Anchors {
   hero: RefObject<HTMLElement | null>
@@ -55,6 +60,16 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     const hero = anchors.hero.current, copy = anchors.copy.current, actions = anchors.actions.current, spec = anchors.spec.current
     if (!hero || !copy || !actions || !spec) return
     const H = hero.getBoundingClientRect()
+    if (isPhone()) {
+      const inner = spec.firstElementChild as HTMLElement | null
+      if (inner) inner.style.zoom = ''
+      spec.style.translate = ''
+      const S = spec.getBoundingClientRect()
+      setBox({ left: S.left - H.left, top: S.top - H.top, width: S.width })
+      setCardW(PHONE_CARD_W)
+      setFrom(null) // no opening transform: it is laid out where it stays
+      return
+    }
     const textRight = Math.max(...[...copy.children].map((c) => textRect(c)?.right ?? 0))
     const act = textRect(actions)!
     const S = spec.getBoundingClientRect()
@@ -239,6 +254,7 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
       settledRef.current = true
       setSettled(true)
     }
+    if (isPhone()) return done() // phones: nothing shrinks and no card grows out of the screen
     if (reducedMotion()) {
       done()
       reveal()

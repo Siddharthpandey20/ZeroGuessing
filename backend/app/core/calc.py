@@ -26,26 +26,47 @@ def _inr(x: float) -> str:
     return f"₹{x:,.2f}"
 
 
-def _verified_operands(spec: CalcSpec, evidence: dict[str, str]) -> tuple[list[tuple[Value, str]], str | None]:
+QUESTION = "Q"  # operand source: the user's own question ("for a sum insured of Rs. 3,00,000")
+
+
+def _verified_operands(spec: CalcSpec, evidence: dict[str, str], question: str = "") -> tuple[list[tuple[Value, str]], str | None]:
+    """Each operand must be found, as a value, in what it cites: an evidence quote, or the question ('Q'). The
+    question can supply the user's own figures (their sum insured), never the rule: at least one operand must come
+    from the documents."""
     out = []
     for op in spec.operands:
-        quote = evidence.get(op.cite)
+        quote = question if op.cite == QUESTION and question else evidence.get(op.cite)
         if quote is None:
             return [], f"operand '{op.name}' cites unknown evidence {op.cite}"
         vals = extract_values(op.value)
         ev_vals = extract_values(quote)
         hit = next((v for v in vals for ev in ev_vals if matches(v, ev)), None)
         if hit is None:
-            return [], f"operand '{op.name}' = '{op.value}' is not in the cited quote"
+            where = "the question" if op.cite == QUESTION else "the cited quote"
+            return [], f"operand '{op.name}' = '{op.value}' is not in {where}"
         out.append((hit, op.cite))
+    if out and all(c == QUESTION for _, c in out):
+        return [], "no operand comes from the documents"
     return out, None
 
 
-def compute(spec: CalcSpec, evidence: dict[str, str]) -> CalcResult:
-    ops, err = _verified_operands(spec, evidence)
+def compute(spec: CalcSpec, evidence: dict[str, str], question: str = "") -> CalcResult:
+    ops, err = _verified_operands(spec, evidence, question)
     cites = [c for _, c in ops]
     if err:
         return CalcResult(False, spec.formula, {}, [], None, "", cites, err)
+    res = _compute(spec, ops, cites)
+    given = [v for v, c in ops if c == QUESTION]
+    if res.ok and given:  # say which figures are the user's own, not the documents'
+        res.steps = res.steps + [f"from your question: {', '.join(_shown(v) for v in given)}"]
+    return res
+
+
+def _shown(v: Value) -> str:
+    return _inr(float(v.value)) if v.type == "inr" else f"{v.value:g}%" if v.type == "pct" else f"{v.value} {v.type}"
+
+
+def _compute(spec: CalcSpec, ops: list[tuple[Value, str]], cites: list[str]) -> CalcResult:
 
     def first(t: str) -> Value | None:
         return next((v for v, _ in ops if v.type == t), None)

@@ -24,3 +24,5 @@
 .links line { stroke: var(--color-ink-2); stroke-width: 1.5; stroke-dasharray: 1 6; stroke-linecap: round; opacity: 0.7; }
 .links circle { fill: var(--color-ink-2); opacity: 0.8; }
 @media (prefers-reduced-motion: reduce) { .links { transition: none; } }
+/* below 72rem the card drops under the headline, so a line from the small screen to it would cut across the copy */
+@media (max-width: 72rem) { .links { display: none; } }

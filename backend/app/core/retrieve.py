@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.amendments import ClauseStatus, key, statuses_for
+from app.core.products import named_documents
 from app.llm.gemini import get_llm
 from app.models import Chunk, Clause, Document, Sentence
 
@@ -40,7 +41,8 @@ class Evidence:
 
     def citation(self) -> dict:
         return {"sentence_id": self.sentence_id, "doc_id": self.doc_id, "doc_title": self.doc_title,
-                "clause_ref": self.clause_ref, "page": self.page, "quote": self.text, "bboxes": self.bboxes,
+                "clause_ref": self.clause_ref, "heading": self.heading_path, "page": self.page, "quote": self.text,
+                "bboxes": self.bboxes,
                 "status": self.status, "status_note": self.status_note}
 
 
@@ -53,6 +55,7 @@ class RetrievalResult:
     terms: list[str]
     docs_searched: int
     chain_events: list[dict] = field(default_factory=list)
+    named: list[set[str]] = field(default_factory=list)  # documents the question names (one set per document/product)
 
 
 def key_terms(q: str) -> list[str]:
@@ -151,6 +154,7 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
     s = get_settings()
     terms = key_terms(search_text or question)
     dense: list[tuple[str, float]] = []
+    qvec = None
     try:
         qvec = await get_llm().embed_query(question)
         dense = await _dense(session, qvec, 50, doc_ids)
@@ -160,6 +164,17 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
     # 127-question insurance set: Hit@1 52% -> 76%, Hit@5 87% -> 99%; demo set unchanged or better)
     fts = await _fts(session, await rare_terms(session, terms, s.fts_max_df, doc_ids), 50, doc_ids)
     ranked = rrf(dense, fts, k=s.rrf_k, weights=[1.0, s.fts_weight])[: s.retrieve_k]
+    named = await named_documents(session, search_text or question, doc_ids)
+    if len(named) > 1 and qvec is not None:
+        # a question about several named documents: each one's best chunks go first, taking turns, so one document's
+        # clauses cannot use up the evidence budget and leave the comparison with one side missing
+        per = [[cid for cid, _ in await _dense(session, qvec, RESERVE, list(g))] for g in named]
+        reserved: list[str] = []
+        for i in range(RESERVE):
+            for lst in per:
+                if i < len(lst) and lst[i] not in reserved:
+                    reserved.append(lst[i])
+        ranked = reserved + [c for c in ranked if c not in reserved]
     docs_searched = (await session.execute(_scoped(select(func.count()).select_from(Document).where(Document.active.is_(True)), doc_ids))).scalar_one()
 
     chunks = {c.id: c for c in (await session.execute(select(Chunk).where(Chunk.id.in_(ranked)))).scalars()} if ranked else {}
@@ -188,10 +203,36 @@ async def retrieve(session: AsyncSession, question: str, as_of: date, search_tex
         statuses.update(extra_st)
     for i, e in enumerate(ev):
         e.eid = f"e{i + 1}"
-    return RetrievalResult(ev, statuses, dense[0][1] if dense else None, len(fts), terms, docs_searched)
+    return RetrievalResult(ev, statuses, dense[0][1] if dense else None, len(fts), terms, docs_searched, named=named)
 
 
 PER_CHUNK = 6
+RESERVE = 3  # chunks kept for each named document in a multi-document question
+
+
+async def clause_neighbours(session: AsyncSession, ev: list[Evidence]) -> dict[str, list[Evidence]]:
+    """For each evidence sentence, the sentences right before and after it in the same clause (never table rows:
+    the next row of a table is a different item, and its value must not prove this one)."""
+    ev = [e for e in ev if not e.is_table_row]
+    if not ev:
+        return {}
+    pos = {r.id: (r.clause_id, r.ord) for r in (await session.execute(
+        select(Sentence.id, Sentence.clause_id, Sentence.ord).where(Sentence.id.in_([e.sentence_id for e in ev])))).all()}
+    want = {(c, o + d) for c, o in pos.values() for d in (-1, 1)}
+    rows = (await session.execute(select(Sentence.id, Sentence.clause_id, Sentence.ord, Sentence.is_table_row)
+                                  .where(Sentence.clause_id.in_({c for c, _ in want})))).all()
+    at = {(r.clause_id, r.ord): r.id for r in rows if not r.is_table_row and (r.clause_id, r.ord) in want}
+    loaded = {x.sentence_id: x for x in await _load_evidence(session, list(set(at.values())))}
+    out: dict[str, list[Evidence]] = {}
+    for e in ev:
+        if e.sentence_id not in pos:
+            continue
+        c, o = pos[e.sentence_id]
+        xs = [loaded[at[(c, o + d)]] for d in (-1, 1) if (c, o + d) in at and at[(c, o + d)] in loaded]
+        for x in xs:  # same clause: same status on the as-of date
+            x.status, x.status_note = e.status, e.status_note
+        out[e.sentence_id] = xs
+    return out
 
 
 async def _budget(session: AsyncSession, ranked: list[Chunk], terms: list[str], limit: int) -> list[str]:

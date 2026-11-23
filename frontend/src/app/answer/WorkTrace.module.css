@@ -1,5 +1,7 @@
 /* The work behind an answer: a quiet one-line toggle, opening onto a hairline timeline of steps. */
 .trace { display: grid; gap: var(--space-xs); margin-bottom: var(--space-md); }
+/* phones: the one-line summary is cut with "…" instead of widening the answer past the screen */
+@media (max-width: 56rem) { .trace { grid-template-columns: minmax(0, 1fr); } .toggle { min-width: 0; } }
 
 .toggle {
   display: inline-flex; align-items: center; gap: var(--space-xs); justify-self: start; max-width: 100%;

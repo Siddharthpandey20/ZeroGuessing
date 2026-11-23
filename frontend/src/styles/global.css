@@ -161,5 +161,6 @@ body { transition: background-color 400ms ease, color 400ms ease; }
 .section-pill-text { display: inline-block; animation: pill-text 500ms var(--ease-out) both; }
 @keyframes pill-text { from { opacity: 0; transform: translateY(8px); } }
 @keyframes pill-pulse { 50% { box-shadow: 0 0 0 7px var(--color-ink-a05); } }
-@media (max-width: 48rem) { .section-pill { left: 12px; bottom: 12px; } }
+/* on a phone a floating label sits on top of the text it scrolls over: the index bars already name each section */
+@media (max-width: 48rem) { .section-pill { display: none; } }
 @media (prefers-reduced-motion: reduce) { .section-pill-dot, .section-pill-text { animation: none; } }

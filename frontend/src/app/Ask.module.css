@@ -84,12 +84,12 @@ h1.chatTitle:only-of-type { flex: 1; }
 /* ---------- responsive ---------- */
 @media (max-width: 80rem) {
   .ask { grid-template-columns: 240px minmax(0, 1fr); }
-  .evidence { position: fixed; z-index: var(--z-modal); top: 56px; right: 0; bottom: 0; width: min(460px, 92vw); box-shadow: var(--shadow-float); transform: translateX(105%); transition: transform var(--dur-long) var(--ease-out); }
+  .evidence { position: fixed; z-index: var(--z-modal); top: var(--top-h, 56px); right: 0; bottom: 0; width: min(460px, 92vw); box-shadow: var(--shadow-float); transform: translateX(105%); transition: transform var(--dur-long) var(--ease-out); }
   .ask[data-evidence] .evidence { transform: none; }
 }
 @media (max-width: 56rem) {
   .ask { grid-template-columns: minmax(0, 1fr); }
-  .rail { position: fixed; z-index: var(--z-modal); top: 56px; left: 0; bottom: 0; width: min(300px, 86vw); box-shadow: var(--shadow-float); transform: translateX(-105%); transition: transform var(--dur-long) var(--ease-out); }
+  .rail { position: fixed; z-index: var(--z-modal); top: var(--top-h, 56px); left: 0; bottom: 0; width: min(300px, 86vw); box-shadow: var(--shadow-float); transform: translateX(-105%); transition: transform var(--dur-long) var(--ease-out); }
   .ask[data-rail] .rail { transform: none; }
   .railToggle { display: inline-flex; }
   .turns { padding: var(--space-lg) var(--space-md) var(--space-xl); }
@@ -98,6 +98,19 @@ h1.chatTitle:only-of-type { flex: 1; }
   .question { font-size: var(--text-xl); }
   .suggest { grid-template-columns: minmax(0, 1fr); }
 }
+/* phones: the question jump list (PromptNav) sits on the right edge, ~36px wide; keep the text clear of it */
+@media (max-width: 40rem) { .turns { padding-right: 44px; } }
+@media (max-width: 56rem) {
+  /* the columns never grow past the screen: a no-wrap line inside an answer (the trace summary) used to widen the
+     whole turn, pushing the answer card off the right edge and under the jump list */
+  .turns, .turn { grid-template-columns: minmax(0, 1fr); }
+  .turn > *, .sheet { min-width: 0; }
+  /* new chat: bottom-aligned, but when it is taller than the screen its top must stay reachable (grid's
+     align-content: end pushed the heading up under the chat bar, out of scroll reach) */
+  .emptyInner { display: flex; flex-direction: column; }
+  .emptyInner > :first-child { margin-top: auto; }
+}
 .arrive { animation: arrive 320ms var(--ease-out) both; }
 @keyframes arrive { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .arrive { animation: none; } }
+.voiceProblem { margin: var(--space-2xs) 0 0; font: var(--text-xs)/1.4 var(--font-body); color: var(--color-ink-2); }

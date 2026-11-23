@@ -85,7 +85,7 @@
 
 @media (max-width: 64rem) {
   .lib, .lib[data-detail] { grid-template-columns: minmax(0, 1fr); }
-  .detail { position: fixed; z-index: var(--z-modal); top: 56px; right: 0; bottom: 0; width: min(440px, 94vw); box-shadow: var(--shadow-float); transform: translateX(105%); transition: transform var(--dur-long) var(--ease-out); }
+  .detail { position: fixed; z-index: var(--z-modal); top: var(--top-h, 56px); right: 0; bottom: 0; width: min(440px, 94vw); box-shadow: var(--shadow-float); transform: translateX(105%); transition: transform var(--dur-long) var(--ease-out); }
   .lib[data-detail] .detail { transform: none; }
   .main { padding: var(--space-lg) var(--space-md) var(--space-xl); }
 }

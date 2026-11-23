@@ -198,6 +198,7 @@ class Message(Base):
     parent_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     question: Mapped[str] = mapped_column(Text)
     input_mode: Mapped[str] = mapped_column(String(8), default="typed")  # typed|camera|voice
+    reply_lang: Mapped[str | None] = mapped_column(String(4), nullable=True)  # hi|hne picked by the user; None = auto
     as_of: Mapped[date] = mapped_column(Date)
     answer: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|done|failed

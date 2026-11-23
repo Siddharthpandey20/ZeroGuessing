@@ -20,7 +20,11 @@ class Settings(BaseSettings):
     gemini_fallback_models: str = "gemini-3.6-flash,gemini-3.5-flash-lite"
     gemini_embed_model: str = "gemini-embedding-2"
     embed_dim: int = 768
-    llm_timeout_s: float = 30.0  # per attempt; a timeout moves to the next model (drafts take ~6-15 s)
+    # a timed-out call is retried on the SAME model this many times before the fallback model answers: measured on the
+    # 127-question set, every fallback draft was a timeout, and a fallback model drafts differently (2 of 4 answers
+    # changed). A retry usually lands in ~7 s, about what the fallback took (4-12 s); 0 = fall back at once.
+    llm_timeout_retries: int = 1
+    llm_timeout_s: float = 30.0  # per attempt (drafts take ~6-15 s)
     # Gemini "thinking" per call: MINIMAL | LOW | MEDIUM | HIGH, empty = the model's default. Less thinking is faster;
     # measure answer quality (scripts.run_eval) before lowering it. The draft has its own knob, the other calls
     # (judge, contradiction confirm, translation, amendment extraction, intent) share LLM_THINKING.

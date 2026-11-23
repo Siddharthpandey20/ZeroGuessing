@@ -59,7 +59,7 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
   // a timeline only explains an answer that was given; under "no proof" it is about some other rule
   const chains = abstained ? [] : distinctChains(answer.amendment_chains ?? [])
   const calcs = (answer.calculations ?? []).filter((c) => c && c.ok)
-  const hindi = answer.lang === 'hi'
+  const hindi = answer.lang === 'hi' || answer.lang === 'hne' // translated: Hindi or Chhattisgarhi, both in text_hi
   const refs = numberCitations(shown)
   const selectCitation = (c: Citation) => onSelect?.({ kind: 'citation', citation: c, highlight: [c.sentence_id] })
   const hasNotices = answer.contradictions.length > 0 || chains.length > 0 || blocked.length > 0
@@ -97,7 +97,7 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
 
       {shown.length > 0 && (
         // an overview is one line per document, so it reads as a list; an answer reads as prose
-        <ProseOrList list={!!answer.overview} lang={hindi ? 'hi' : undefined}>
+        <ProseOrList list={!!answer.overview} lang={hindi ? answer.lang : undefined}>
           {shown.map((c, i) => (
             <ItemOf key={i} list={!!answer.overview}>
               <span className={styles.claim} data-verdict={c.verdict} data-active={c.citations.some((x) => x.sentence_id === selectedSentence) || undefined}>

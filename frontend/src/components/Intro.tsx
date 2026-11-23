@@ -12,7 +12,7 @@ const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 's
 /**
  * The opening shows the product doing its one job, in miniature, instead of promising it: a clause from a circular,
  * a claim whose words are found in it (highlighted, four checks tick), and a claim with no source, struck out and
- * blocked. Then the wordmark, and the curtain lifts. About 3.3 s, once per page load, skipped by any click or key,
+ * blocked. Then the wordmark, and the curtain lifts. About 2.9 s, once per page load, skipped by any click or key,
  * never shown under reduced motion.
  */
 export function Intro({ onDone }: { onDone: () => void }) {
@@ -25,7 +25,7 @@ export function Intro({ onDone }: { onDone: () => void }) {
     }
     if (state !== 'run') return
     playedThisLoad = true
-    const lift = window.setTimeout(() => setState('lift'), 3300)
+    const lift = window.setTimeout(() => setState('lift'), 2900)
     const skip = () => setState('lift')
     window.addEventListener('keydown', skip, { once: true })
     window.addEventListener('pointerdown', skip, { once: true })
@@ -39,7 +39,7 @@ export function Intro({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (state !== 'lift') return
     onDone()
-    const t = window.setTimeout(() => setState('off'), 900)
+    const t = window.setTimeout(() => setState('off'), 800)
     return () => window.clearTimeout(t)
   }, [state, onDone])
 
@@ -67,8 +67,8 @@ export function Intro({ onDone }: { onDone: () => void }) {
             </p>
             <ul className={styles.checks}>
               {CHECKS.map((c, i) => (
-                <li key={c} style={{ animationDelay: `${1180 + i * 170}ms` }}>
-                  <span className={styles.tick} style={{ animationDelay: `${1260 + i * 170}ms` }} />
+                <li key={c} style={{ animationDelay: `${1040 + i * 150}ms` }}>
+                  <span className={styles.tick} style={{ animationDelay: `${1110 + i * 150}ms` }} />
                   {c}
                 </li>
               ))}
