@@ -40,9 +40,18 @@ class Settings(BaseSettings):
     cookie_secure: bool = False  # True in production (HTTPS)
     cookie_samesite: str = "lax"  # "none" if frontend and API are on different sites (requires secure)
 
-    storage_backend: str = "local"  # local | gcs
+    storage_backend: str = "local"  # local | s3 | gcs
     storage_dir: str = "./data/files"
     gcs_bucket: str = ""
+    # S3 or any S3-compatible store (AWS S3, Cloudflare R2, Railway buckets, MinIO). Credentials come from the usual
+    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY variables.
+    s3_bucket: str = ""
+    s3_region: str = ""
+    s3_endpoint_url: str = ""  # empty = AWS; set for R2/MinIO/Railway buckets
+    s3_prefix: str = ""  # optional folder inside the bucket
+
+    # production: the built web app (frontend/dist), served by this API from the same origin. Empty = API only.
+    static_dir: str = ""
 
     # verification / retrieval thresholds (tuned on the eval set)
     retrieve_k: int = 20
@@ -59,6 +68,16 @@ class Settings(BaseSettings):
     def _clean_client_id(cls, v: object) -> object:
         # a pasted id with a stray space or quotes never matches the token's `aud` claim
         return v.strip().strip("\"'").strip() if isinstance(v, str) else v
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _asyncpg_url(cls, v: str) -> str:
+        # Railway/Render/Heroku hand out postgres:// or postgresql:// URLs; SQLAlchemy async needs the asyncpg
+        # driver, and asyncpg takes ssl=require instead of libpq's sslmode=require
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                v = "postgresql+asyncpg://" + v[len(prefix):]
+        return v.replace("sslmode=", "ssl=")
 
     @field_validator("storage_dir", mode="after")
     @classmethod

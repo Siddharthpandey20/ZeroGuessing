@@ -1,4 +1,4 @@
-"""File storage: local disk for dev, GCS for Cloud Run (no persistent disk there)."""
+"""File storage: local disk for dev (or a mounted volume), S3/S3-compatible or GCS for hosted deploys."""
 
 from pathlib import Path
 from typing import Protocol
@@ -44,6 +44,23 @@ class GCSStorage:
         return self.bucket.blob(key).download_as_bytes()
 
 
+class S3Storage:
+    """AWS S3 or any S3-compatible store (Cloudflare R2, Railway buckets, MinIO)."""
+
+    def __init__(self, bucket: str, region: str = "", endpoint_url: str = "", prefix: str = ""):
+        import boto3  # optional dependency: uv sync --extra s3
+
+        self.bucket = bucket
+        self.prefix = prefix.strip("/") + "/" if prefix.strip("/") else ""
+        self.client = boto3.client("s3", region_name=region or None, endpoint_url=endpoint_url or None)
+
+    def put(self, key: str, data: bytes) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=self.prefix + key, Body=data, ContentType="application/pdf")
+
+    def get(self, key: str) -> bytes:
+        return self.client.get_object(Bucket=self.bucket, Key=self.prefix + key)["Body"].read()
+
+
 _storage: Storage | None = None
 
 
@@ -51,5 +68,12 @@ def get_storage() -> Storage:
     global _storage
     if _storage is None:
         s = get_settings()
-        _storage = GCSStorage(s.gcs_bucket) if s.storage_backend == "gcs" else LocalStorage(s.storage_dir)
+        if s.storage_backend == "s3":
+            if not s.s3_bucket:
+                raise RuntimeError("STORAGE_BACKEND=s3 needs S3_BUCKET")
+            _storage = S3Storage(s.s3_bucket, s.s3_region, s.s3_endpoint_url, s.s3_prefix)
+        elif s.storage_backend == "gcs":
+            _storage = GCSStorage(s.gcs_bucket)
+        else:
+            _storage = LocalStorage(s.storage_dir)
     return _storage
