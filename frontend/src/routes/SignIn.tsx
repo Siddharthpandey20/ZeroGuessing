@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth'
 import type { User } from '../lib/types'
 import { Haze } from '../components/Haze'
 import styles from './SignIn.module.css'
+import { tr } from '../lib/i18n'
 
 interface AuthConfig {
   google_client_id: string | null
@@ -81,7 +82,7 @@ export default function SignIn() {
     try {
       done((await post<TokenOut>('/api/auth/google', { credential })).user)
     } catch (e) {
-      setGError(e instanceof ApiError ? e.message : 'Google sign-in failed. Check your connection and try again.')
+      setGError(e instanceof ApiError ? e.message : tr('Google sign-in failed. Check your connection and try again.'))
     } finally {
       setBusy(false)
     }
@@ -131,7 +132,7 @@ export default function SignIn() {
     try {
       done((await post<TokenOut>('/api/auth/login', { email, password })).user)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not sign in. Check your connection.')
+      setError(err instanceof ApiError ? err.message : tr('Could not sign in. Check your connection.'))
     } finally {
       setBusy(false)
     }
@@ -145,23 +146,23 @@ export default function SignIn() {
       <aside className={styles.side}>
         <Haze className={styles.haze} />
         <Link to="/" className={`${styles.brand} wordmark`}>zeroguess</Link>
-        <p className={styles.line}>Answers from your documents, each one cited to the sentence it came from.</p>
+        <p className={styles.line}>{tr('Answers from your documents, each one cited to the sentence it came from.')}</p>
       </aside>
 
       <main className={styles.main}>
         <div className={styles.panel}>
-          <h1 className={styles.h1}>Sign in</h1>
-          <p className={styles.sub}>Use your work account. Documents stay on this deployment.</p>
+          <h1 className={styles.h1}>{tr('Sign in')}</h1>
+          <p className={styles.sub}>{tr('Use your work account. Documents stay on this deployment.')}</p>
 
           {google ? (
             <div className={styles.google} aria-busy={gisState === 'loading' || busy}>
               {gisState !== 'failed' && (
-                <div ref={gRef} className={styles.gBtn} data-state={gisState} aria-label="Continue with Google" />
+                <div ref={gRef} className={styles.gBtn} data-state={gisState} aria-label={tr('Continue with Google')} />
               )}
               {gisState === 'failed' && (
-                <p className={styles.error} role="alert">Google sign-in could not load (blocked or offline). Use email and password instead.</p>
+                <p className={styles.error} role="alert">{tr('Google sign-in could not load (blocked or offline). Use email and password instead.')}</p>
               )}
-              {busy && <p className={styles.gNote} role="status">Checking your Google account</p>}
+              {busy && <p className={styles.gNote} role="status">{tr('Checking your Google account')}</p>}
               {gError && <p className={styles.error} role="alert">{gError}</p>}
             </div>
           ) : (
@@ -176,26 +177,26 @@ export default function SignIn() {
               </div>
             )
           )}
-          {password_ok && <div className={styles.or}><span>or with email</span></div>}
+          {password_ok && <div className={styles.or}><span>{tr('or with email')}</span></div>}
 
           {password_ok && (
             <form className={styles.form} onSubmit={submit} noValidate>
               <label className="field">
-                <span className="field-label">Email</span>
+                <span className="field-label">{tr('Email')}</span>
                 <input className="input" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!error || undefined} />
               </label>
               <label className="field">
-                <span className="field-label">Password</span>
+                <span className="field-label">{tr('Password')}</span>
                 <input className="input" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={!!error || undefined} />
               </label>
               {error && <p className={styles.error} role="alert">{error}</p>}
               <button className="btn btn-primary" type="submit" disabled={busy || !email || !password}>
-                {busy ? 'Signing in' : 'Sign in'}
+                {tr(busy ? 'Signing in' : 'Sign in')}
               </button>
             </form>
           )}
           {!password_ok && error && <p className={styles.error} role="alert">{error}</p>}
-          {cfg.isError && <p className={styles.error} role="alert">The server is not reachable. Check that the API is running.</p>}
+          {cfg.isError && <p className={styles.error} role="alert">{tr('The server is not reachable. Check that the API is running.')}</p>}
         </div>
       </main>
     </div>

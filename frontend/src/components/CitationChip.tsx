@@ -16,6 +16,7 @@ import {
   useTransitionStyles,
 } from '@floating-ui/react'
 import styles from './CitationChip.module.css'
+import { tr } from '../lib/i18n'
 
 export interface ChipSource {
   docTitle: string
@@ -115,8 +116,8 @@ export function CitationChip({ source, tone = 'proof', active, onSelect, n }: Pr
                 </div>
                 <img className={`crop ${styles.popImg}`} src={source.img} alt="" loading="eager" decoding="async" />
                 <p className={styles.quote}>“{source.quote.trim()}”</p>
-                {stale && <p className={styles.stale}>{source.statusNote || `This clause is ${source.status?.replaceAll('_', ' ')} on the date asked.`}</p>}
-                {onSelect && <p className={styles.hint}>Click to open the full page</p>}
+                {stale && <p className={styles.stale}>{source.statusNote || tr('This clause is {status} on the date asked.', { status: tr(source.status?.replaceAll('_', ' ') ?? '') })}</p>}
+                {onSelect && <p className={styles.hint}>{tr('Click to open the full page')}</p>}
               </div>
             </div>
         )}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, SwitchCamera, X } from 'lucide-react'
 import styles from './CameraCapture.module.css'
+import { tr } from '../lib/i18n'
 
 /** Live viewfinder: point the camera at a printed question or clause and take the shot. */
 export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) => void; onClose: () => void }) {
@@ -37,9 +38,9 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
       .catch((e: DOMException) => {
         if (cancelled) return
         setError(
-          e.name === 'NotAllowedError' ? 'Camera access is blocked. Allow it in the browser’s site settings, or upload an image instead.'
-          : e.name === 'NotFoundError' ? 'No camera was found on this device. Upload an image instead.'
-          : 'The camera could not be started. Upload an image instead.',
+          e.name === 'NotAllowedError' ? tr('Camera access is blocked. Allow it in the browser’s site settings, or upload an image instead.')
+          : e.name === 'NotFoundError' ? tr('No camera was found on this device. Upload an image instead.')
+          : tr('The camera could not be started. Upload an image instead.'),
         )
       })
     return () => {
@@ -61,25 +62,25 @@ export function CameraCapture({ onCapture, onClose }: { onCapture: (file: File) 
   return (
     <dialog ref={dialog} className={styles.dialog} onClose={onClose} aria-labelledby="cam-title">
       <div className={styles.head}>
-        <h2 id="cam-title" className={styles.title}>Take a photo</h2>
-        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label="Close the camera"><X size={16} /></button>
+        <h2 id="cam-title" className={styles.title}>{tr('Take a photo')}</h2>
+        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label={tr('Close the camera')}><X size={16} /></button>
       </div>
       <div className={styles.view}>
-        <video ref={video} className={styles.video} data-mirror={facing === 'user' || undefined} playsInline muted aria-label="Camera preview" />
-        {!ready && !error && <span className={styles.wait}>Starting the camera</span>}
+        <video ref={video} className={styles.video} data-mirror={facing === 'user' || undefined} playsInline muted aria-label={tr('Camera preview')} />
+        {!ready && !error && <span className={styles.wait}>{tr('Starting the camera')}</span>}
         {error && <p className={styles.error} role="alert">{error}</p>}
       </div>
-      <p className={styles.hint}>Point at the printed question or clause and hold steady. The text is read, and you check it before asking.</p>
+      <p className={styles.hint}>{tr('Point at the printed question or clause and hold steady. The text is read, and you check it before asking.')}</p>
       <div className={styles.actions}>
         {cams > 1 && (
           <button type="button" className="btn btn-quiet btn-sm" onClick={() => setFacing((f) => (f === 'environment' ? 'user' : 'environment'))}>
-            <SwitchCamera size={15} aria-hidden="true" /> Switch camera
+            <SwitchCamera size={15} aria-hidden="true" /> {tr('Switch camera')}
           </button>
         )}
         <span className={styles.spacer} />
         <button type="button" className="btn btn-quiet btn-sm" onClick={onClose}>Cancel</button>
         <button type="button" className="btn btn-primary btn-sm" onClick={shoot} disabled={!ready}>
-          <Camera size={15} aria-hidden="true" /> Capture
+          <Camera size={15} aria-hidden="true" /> {tr('Capture')}
         </button>
       </div>
     </dialog>

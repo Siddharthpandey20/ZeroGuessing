@@ -1,3 +1,4 @@
+import { uiLocale } from '../../lib/i18n'
 import type { Chain, Citation, Conflict } from '../../lib/types'
 
 /** What the evidence panel is showing. */
@@ -20,13 +21,13 @@ export const STATUS_LABEL: Record<string, string> = {
 export function fmtDate(iso: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }) {
   if (!iso) return ''
   const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-IN', opts)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(uiLocale(), opts)
 }
 
 export function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return ''
   const d = new Date(iso)
-  return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export const inr = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`

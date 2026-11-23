@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { HI } from './i18n.hi'
 
 /**
@@ -22,6 +22,14 @@ function read(): UiLang {
 
 const fill = (s: string, vars?: Vars) => (vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s)
 
+let current: UiLang = read()
+
+/** The translator outside React state: fine because the app re-renders from the top when the language changes. */
+export const tr: T = (text, vars) => translate(current, text, vars)
+
+/** Locale for dates: Hindi month names with international numerals, as in official Hindi documents. */
+export const uiLocale = () => (current === 'hi' ? 'hi-IN-u-nu-latn' : 'en-IN')
+
 /** Devanagari digits are not used: Indian official Hindi documents keep international numerals, and so do the PDFs. */
 export const translate = (lang: UiLang, text: string, vars?: Vars) => fill(lang === 'hi' ? HI[text] ?? text : text, vars)
 
@@ -39,6 +47,7 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.lang = lang === 'hi' ? 'hi' : 'en'
   }, [lang])
   const setLang = useCallback((l: UiLang) => {
+    current = l
     setLangState(l)
     try {
       localStorage.setItem(KEY, l)
@@ -48,7 +57,8 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
   }, [])
   const t = useCallback<T>((text, vars) => translate(lang, text, vars), [lang])
   const value = useMemo(() => ({ lang, setLang, t }), [lang, setLang, t])
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  // keyed on the language: every string is re-read on a switch (queries and in-flight answers live outside, so survive)
+  return <Ctx.Provider value={value}><Fragment key={lang}>{children}</Fragment></Ctx.Provider>
 }
 
 export const useLang = () => useContext(Ctx)

@@ -7,6 +7,7 @@ import { AsOfSlider } from './answer/AsOfSlider'
 import { ChainStrip, ConflictCard, eventValue, keyValue } from './answer/AnswerView'
 import { briefDoc, type CropFor, type Selection } from './answer/selection'
 import styles from './Evidence.module.css'
+import { tr } from '../lib/i18n'
 
 export function Evidence({ selection, onClose, onSelect, cropFor }: {
   selection: Selection; onClose: () => void; onSelect: (s: Selection) => void; cropFor: CropFor
@@ -16,9 +17,9 @@ export function Evidence({ selection, onClose, onSelect, cropFor }: {
     <div className={styles.panel}>
       <div className={styles.head}>
         <span className={styles.kicker}>
-          {selection.kind === 'citation' ? 'Source page' : selection.kind === 'conflict' ? 'Conflicting clauses' : 'Every version of this rule'}
+          {tr(selection.kind === 'citation' ? 'Source page' : selection.kind === 'conflict' ? 'Conflicting clauses' : 'Every version of this rule')}
         </span>
-        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label="Close the evidence panel">
+        <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label={tr('Close the evidence panel')}>
           <X size={16} strokeWidth={1.8} />
         </button>
       </div>
@@ -30,7 +31,7 @@ export function Evidence({ selection, onClose, onSelect, cropFor }: {
             <div className={styles.pair}>
               {[selection.conflict.a, selection.conflict.b].map((s) => (
                 <button key={s.sentence_id} type="button" className="btn btn-ghost btn-sm" onClick={() => onSelect({ kind: 'citation', citation: { ...s, status: 'current' }, highlight: [s.sentence_id] })}>
-                  Open {briefDoc(s.doc_title)}, page {s.page}
+                  {tr('Open {doc}, page {page}', { doc: briefDoc(s.doc_title), page: s.page })}
                 </button>
               ))}
             </div>
@@ -63,13 +64,13 @@ export function Evidence({ selection, onClose, onSelect, cropFor }: {
 function EvidenceEmpty() {
   return (
     <div className={styles.empty}>
-      <p className={styles.emptyHead}>Pick a citation to see the page it came from.</p>
+      <p className={styles.emptyHead}>{tr('Pick a citation to see the page it came from.')}</p>
       <ul className={styles.legend}>
-        <li><span className={styles.swatch} data-k="proof" />Backed by a verbatim quote</li>
-        <li><span className={styles.swatch} data-k="conflict" />Another clause disagrees</li>
-        <li><span className={styles.swatch} data-k="blocked" />Blocked: no matching quote, or the clause is not in force</li>
+        <li><span className={styles.swatch} data-k="proof" />{tr('Backed by a verbatim quote')}</li>
+        <li><span className={styles.swatch} data-k="conflict" />{tr('Another clause disagrees')}</li>
+        <li><span className={styles.swatch} data-k="blocked" />{tr('Blocked: no matching quote, or the clause is not in force')}</li>
       </ul>
-      <p className={styles.emptyNote}>Hover any citation for a quick look. Click it to open the full page here.</p>
+      <p className={styles.emptyNote}>{tr('Hover any citation for a quick look. Click it to open the full page here.')}</p>
     </div>
   )
 }
@@ -91,8 +92,8 @@ function PageView({ citation, highlight }: { citation: Citation; highlight: stri
         <div className={styles.docTitle}>
           <span>{citation.doc_title}</span>
           <span className={styles.docMeta}>
-            {citation.clause_ref ? `Clause ${citation.clause_ref}, ` : ''}page {citation.page}
-            {citation.status && citation.status !== 'current' ? `, ${citation.status.replaceAll('_', ' ')} on the date asked` : ''}
+            {citation.clause_ref ? tr('Clause {ref}, ', { ref: citation.clause_ref }) : ''}{tr('page {n}', { n: citation.page })}
+            {citation.status && citation.status !== 'current' ? `, ${tr(citation.status.replaceAll('_', ' '))} ${tr('on the date asked')}` : ''}
           </span>
         </div>
         <a className="btn btn-quiet btn-icon btn-sm" href={`${fileUrl(citation.doc_id)}#page=${page}`} target="_blank" rel="noreferrer" aria-label="Open the PDF in a new tab">

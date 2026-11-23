@@ -6,6 +6,7 @@ import type { Conflict } from '../lib/types'
 import { ConflictCard } from './answer/AnswerView'
 import { fmtDateTime } from './answer/selection'
 import styles from './Alerts.module.css'
+import { tr } from '../lib/i18n'
 
 /** Conflicts found across the library without anyone asking: both quotes, both pages, side by side. */
 export default function Alerts() {
@@ -34,29 +35,29 @@ export default function Alerts() {
     <div className={styles.page}>
       <header className={styles.head}>
         <div>
-          <h1 className={styles.h1}>Alerts</h1>
+          <h1 className={styles.h1}>{tr('Alerts')}</h1>
           <p className={styles.sub}>
-            {alerts.isLoading ? 'Loading' : n ? `${n} ${n === 1 ? 'conflict' : 'conflicts'} between clauses on the same subject. Amendments that lawfully replace a clause are not listed here.` : 'No conflicts between the documents in use.'}
+            {alerts.isLoading ? tr('Loading') : n ? `${tr(n === 1 ? '{n} conflict between clauses on the same subject.' : '{n} conflicts between clauses on the same subject.', { n })} ${tr('Amendments that lawfully replace a clause are not listed here.')}` : tr('No conflicts between the documents in use.')}
           </p>
         </div>
         {isAdmin && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => scan.mutate()} disabled={scan.isPending}>
-            <ScanSearch size={15} strokeWidth={1.8} aria-hidden="true" /> {scan.isSuccess ? 'Scanning the library' : 'Scan again'}
+            <ScanSearch size={15} strokeWidth={1.8} aria-hidden="true" /> {tr(scan.isSuccess ? 'Scanning the library' : 'Scan again')}
           </button>
         )}
       </header>
 
-      {alerts.isError && <p className={styles.error} role="alert">Alerts could not be loaded. Try again in a moment.</p>}
+      {alerts.isError && <p className={styles.error} role="alert">{tr('Alerts could not be loaded. Try again in a moment.')}</p>}
 
       <div className={styles.grid}>
         {alerts.isLoading && [0, 1].map((i) => <span key={i} className={`skeleton ${styles.skel}`} />)}
         {alerts.data?.map((x) => (
           <article key={x.id} className={styles.item}>
             <div className={styles.itemTop}>
-              <span className={styles.found}>{x.source === 'query' ? 'Found while answering' : 'Found by the library scan'}, {fmtDateTime(x.created_at)}</span>
+              <span className={styles.found}>{tr(x.source === 'query' ? 'Found while answering' : 'Found by the library scan')}, {fmtDateTime(x.created_at)}</span>
               {isAdmin && (
-                <button type="button" className="btn btn-quiet btn-sm" onClick={() => dismiss.mutate(x.id)} aria-label="Dismiss this alert">
-                  <X size={14} aria-hidden="true" /> Dismiss
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => dismiss.mutate(x.id)} aria-label={tr('Dismiss this alert')}>
+                  <X size={14} aria-hidden="true" /> {tr('Dismiss')}
                 </button>
               )}
             </div>
@@ -67,8 +68,8 @@ export default function Alerts() {
 
       {!alerts.isLoading && !n && !alerts.isError && (
         <div className={styles.empty}>
-          <p className={styles.emptyHead}>Nothing disagrees.</p>
-          <p>When two clauses state different numbers, dates, rules or eligibility for the same subject, they appear here with both quotes.</p>
+          <p className={styles.emptyHead}>{tr('Nothing disagrees.')}</p>
+          <p>{tr('When two clauses state different numbers, dates, rules or eligibility for the same subject, they appear here with both quotes.')}</p>
         </div>
       )}
     </div>

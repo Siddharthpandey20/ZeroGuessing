@@ -14,6 +14,7 @@ import { Evidence } from './Evidence'
 import { ShareDialog } from './ShareDialog'
 import { consumeSpeak, dismissPending, runAnswer, takeFresh, usePending, type Pending } from './askStore'
 import styles from './Ask.module.css'
+import { tr } from '../lib/i18n'
 
 const SUGGESTIONS = [
   'What is the prepayment penalty on a floating-rate home loan today?',
@@ -102,7 +103,7 @@ export default function Ask() {
         setNotes(res.filter((r) => r.status === 'rejected').map((r) => `${r.filename} was not added: ${r.detail ?? 'not a usable PDF'}.`))
         await Promise.all([qc.invalidateQueries({ queryKey: ['chat-docs', id] }), qc.invalidateQueries({ queryKey: ['documents'] })])
       } catch (e) {
-        setNotes([e instanceof ApiError ? e.message : 'The upload failed. Check your connection and try again.'])
+        setNotes([e instanceof ApiError ? e.message : tr('The upload failed. Check your connection and try again.')])
       } finally {
         setUploading(false)
       }
@@ -137,21 +138,21 @@ export default function Ask() {
         }}
       />
 
-      <section className={styles.thread} aria-label="Conversation">
+      <section className={styles.thread} aria-label={tr('Conversation')}>
         <div className={styles.threadTop}>
-          <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.railToggle}`} onClick={() => setRailOpen((o) => !o)} aria-label="Show chats">
+          <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.railToggle}`} onClick={() => setRailOpen((o) => !o)} aria-label={tr('Show chats')}>
             <PanelLeft size={16} strokeWidth={1.8} />
           </button>
           <ChatName chatId={chatId} title={chat.data?.title} />
           <button ref={docsBtn} type="button" className={`btn btn-ghost btn-sm ${styles.docsBtn}`} onClick={() => setDocsOpen((o) => !o)}
-            aria-expanded={docsOpen} aria-label={`Documents in this chat: ${docs.length}`}>
+            aria-expanded={docsOpen} aria-label={tr('Documents in this chat: {n}', { n: docs.length })}>
             <Files size={14} strokeWidth={1.8} aria-hidden="true" />
-            <span className={styles.docsLabel}>Documents</span>
+            <span className={styles.docsLabel}>{tr('Documents')}</span>
             <span className={`${styles.docsCount} tnum`} data-empty={docs.length === 0 || undefined}>{docs.length}</span>
           </button>
           {chatId && !!chat.data?.turns.length && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareFor({})} aria-label="Share this chat">
-              <Share2 size={14} strokeWidth={1.8} aria-hidden="true" /> <span className={styles.docsLabel}>Share</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareFor({})} aria-label={tr('Share this chat')}>
+              <Share2 size={14} strokeWidth={1.8} aria-hidden="true" /> <span className={styles.docsLabel}>{tr('Share')}</span>
             </button>
           )}
         </div>
@@ -176,7 +177,7 @@ export default function Ask() {
         )}
       </section>
 
-      <aside className={styles.evidence} aria-label="Evidence">
+      <aside className={styles.evidence} aria-label={tr('Evidence')}>
         <Evidence selection={selection} onClose={() => setSelection(null)} onSelect={setSelection} cropFor={cropFor} />
       </aside>
 
@@ -195,7 +196,7 @@ function ChatName({ chatId, title }: { chatId?: string; title?: string }) {
   const [value, setValue] = useState('')
   const [error, setError] = useState(false)
 
-  if (!chatId) return <h1 className={styles.chatTitle}>New chat</h1>
+  if (!chatId) return <h1 className={styles.chatTitle}>{tr('New chat')}</h1>
 
   const save = async () => {
     const t = value.trim().replace(/\s+/g, ' ').slice(0, 60)
@@ -216,7 +217,7 @@ function ChatName({ chatId, title }: { chatId?: string; title?: string }) {
 
   if (editing)
     return (
-      <input className={styles.titleInput} autoFocus value={value} maxLength={60} aria-label="Chat name"
+      <input className={styles.titleInput} autoFocus value={value} maxLength={60} aria-label={tr('Chat name')}
         onChange={(e) => setValue(e.target.value)} onBlur={save} onFocus={(e) => e.target.select()}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
@@ -232,10 +233,10 @@ function ChatName({ chatId, title }: { chatId?: string; title?: string }) {
   return (
     <div className={styles.titleRow}>
       <h1 className={styles.chatTitle} onDoubleClick={() => { setValue(title ?? ''); setEditing(true) }}>{title ?? ' '}</h1>
-      <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.rename}`} onClick={() => { setValue(title ?? ''); setEditing(true) }} aria-label="Rename this chat" title="Rename">
+      <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.rename}`} onClick={() => { setValue(title ?? ''); setEditing(true) }} aria-label={tr('Rename this chat')} title={tr('Rename')}>
         <Pencil size={13} strokeWidth={1.8} />
       </button>
-      {error && <span className={styles.renameErr} role="alert">Not saved</span>}
+      {error && <span className={styles.renameErr} role="alert">{tr('Not saved')}</span>}
     </div>
   )
 }
@@ -245,20 +246,20 @@ function ChatRail({ chats, loading, activeId, onPick, onDelete }: {
 }) {
   const [confirm, setConfirm] = useState<string | null>(null)
   return (
-    <nav className={styles.rail} aria-label="Your chats">
+    <nav className={styles.rail} aria-label={tr('Your chats')}>
       <Link to="/app" className="btn btn-ink btn-sm" onClick={onPick}>
-        <Plus size={15} strokeWidth={2} aria-hidden="true" /> New chat
+        <Plus size={15} strokeWidth={2} aria-hidden="true" /> {tr('New chat')}
       </Link>
       <div className={styles.railList}>
         {loading && [0, 1, 2, 3].map((i) => <span key={i} className={`skeleton ${styles.railSkel}`} />)}
-        {!loading && !chats?.length && <p className={styles.railEmpty}>Chats you start are kept here.</p>}
+        {!loading && !chats?.length && <p className={styles.railEmpty}>{tr('Chats you start are kept here.')}</p>}
         {chats?.map((c) => (
           <div key={c.id} className={styles.railItem} data-active={c.id === activeId || undefined}>
             {confirm === c.id ? (
               <div className={styles.confirm}>
-                <span>Delete this chat?</span>
-                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setConfirm(null)}>Keep</button>
-                <button type="button" className={`btn btn-sm ${styles.danger}`} onClick={() => { setConfirm(null); onDelete(c.id) }}>Delete</button>
+                <span>{tr('Delete this chat?')}</span>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setConfirm(null)}>{tr('Keep')}</button>
+                <button type="button" className={`btn btn-sm ${styles.danger}`} onClick={() => { setConfirm(null); onDelete(c.id) }}>{tr('Delete')}</button>
               </div>
             ) : (
               <>
@@ -266,7 +267,7 @@ function ChatRail({ chats, loading, activeId, onPick, onDelete }: {
                   <span className={styles.railTitle}>{c.title}</span>
                   <span className={styles.railDate}>{fmtDate(c.updated_at, { day: 'numeric', month: 'short' })}</span>
                 </Link>
-                <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.railDel}`} onClick={() => setConfirm(c.id)} aria-label={`Delete “${c.title}”`}>
+                <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.railDel}`} onClick={() => setConfirm(c.id)} aria-label={tr('Delete “{title}”', { title: c.title })}>
                   <Trash2 size={14} strokeWidth={1.8} />
                 </button>
               </>
@@ -288,12 +289,12 @@ function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading,
   return (
     <div className={styles.empty}>
       <div className={styles.emptyInner}>
-        <h2 className={styles.emptyHead}>Ask the documents.<br />Get only what they prove.</h2>
+        <h2 className={styles.emptyHead}>{tr('Ask the documents.')}<br />{tr('Get only what they prove.')}</h2>
         {loading ? (
-          <p className={styles.emptySub}>Checking this chat’s documents</p>
+          <p className={styles.emptySub}>{tr('Checking this chat’s documents')}</p>
         ) : total === 0 ? (
           <>
-            <p className={styles.emptySub}>Start by adding the PDFs this chat should answer from. Answers will quote them and nothing else.</p>
+            <p className={styles.emptySub}>{tr('Start by adding the PDFs this chat should answer from. Answers will quote them and nothing else.')}</p>
             <input ref={picker} type="file" accept="application/pdf,.pdf" multiple hidden
               onChange={(e) => {
                 const files = Array.from(e.target.files ?? [])
@@ -302,21 +303,21 @@ function EmptyChat({ onAsk, onAttach, onDemo, onOpenDocs, total, ready, loading,
               }} />
             <div className={styles.startActions}>
               <button type="button" className="btn btn-ink" onClick={() => picker.current?.click()} disabled={uploading}>
-                <Upload size={15} strokeWidth={1.8} aria-hidden="true" /> Upload PDFs
+                <Upload size={15} strokeWidth={1.8} aria-hidden="true" /> {tr('Upload PDFs')}
               </button>
               <button type="button" className="btn btn-ghost" onClick={onDemo} disabled={uploading}>
-                <Sparkles size={15} strokeWidth={1.8} aria-hidden="true" /> Use the demo documents
+                <Sparkles size={15} strokeWidth={1.8} aria-hidden="true" /> {tr('Use the demo documents')}
               </button>
             </div>
           </>
         ) : (
           <>
             <p className={styles.emptySub}>
-              {total} {total === 1 ? 'document' : 'documents'} in this chat{working > 0 ? `, ${working} still being read` : ''}.{' '}
-              <button type="button" className={styles.inlineLink} onClick={onOpenDocs}>See them</button>
+              {tr(total === 1 ? '{n} document in this chat' : '{n} documents in this chat', { n: total })}{working > 0 ? tr(', {n} still being read', { n: working }) : ''}.{' '}
+              <button type="button" className={styles.inlineLink} onClick={onOpenDocs}>{tr('See them')}</button>
             </p>
             <ul className={styles.suggest}>
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTIONS.map((q) => tr(q)).map((s) => (
                 <li key={s}>
                   <button type="button" onClick={() => setSeed(s)}>{s}</button>
                 </li>
@@ -427,7 +428,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                 <header className={styles.qRow}>
                   {editing === t.turn ? (
                     <div className={styles.editBox}>
-                      <Composer compact autoFocus submitLabel="Resend" initial={{ question: m.question, asOf: m.as_of }} onCancel={() => setEditing(null)} onSubmit={(q, a, mode) => resend(t, q, a, mode)} />
+                      <Composer compact autoFocus submitLabel={tr('Resend')} initial={{ question: m.question, asOf: m.as_of }} onCancel={() => setEditing(null)} onSubmit={(q, a, mode) => resend(t, q, a, mode)} />
                     </div>
                   ) : (
                     <>
@@ -436,14 +437,14 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                         {m.input_mode === 'camera' && <span className={styles.badge}><Camera size={12} aria-hidden="true" /> From a photo</span>}
                         {m.input_mode === 'voice' && <span className={styles.badge}><Mic size={12} aria-hidden="true" /> Spoken</span>}
                         {t.versions.length > 1 && !live && (
-                          <span className={styles.versions} aria-label="Versions of this question">
-                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version <= 1 || switching || busy} onClick={() => void switchVersion(t, version - 1)} aria-label="Previous version"><ChevronLeft size={14} /></button>
+                          <span className={styles.versions} aria-label={tr('Versions of this question')}>
+                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version <= 1 || switching || busy} onClick={() => void switchVersion(t, version - 1)} aria-label={tr('Previous version')}><ChevronLeft size={14} /></button>
                             <span className="tnum">{version} of {t.versions.length}</span>
-                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version >= t.versions.length || switching || busy} onClick={() => void switchVersion(t, version + 1)} aria-label="Next version"><ChevronRight size={14} /></button>
+                            <button type="button" className="btn btn-quiet btn-icon btn-sm" disabled={version >= t.versions.length || switching || busy} onClick={() => void switchVersion(t, version + 1)} aria-label={tr('Next version')}><ChevronRight size={14} /></button>
                           </span>
                         )}
                         {!live && (
-                          <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => setEditing(t.turn)} disabled={busy} aria-label="Edit the question or its date and resend">
+                          <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={() => setEditing(t.turn)} disabled={busy} aria-label={tr('Edit the question or its date and resend')}>
                             <Pencil size={14} strokeWidth={1.8} />
                           </button>
                         )}
@@ -456,7 +457,7 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                   {live ? (
                     live.error ? <StreamError p={live} chatId={chatId} /> : <LiveTrace steps={live.trace} stage={live.stage} info={live.info} startedAt={live.startedAt} />
                   ) : m.status === 'failed' || !m.answer || m.answer.error ? (
-                    <FailedAnswer message={(m.answer?.error as string) ?? 'This answer failed.'} onRetry={() => regenerate(t, m)} />
+                    <FailedAnswer message={(m.answer?.error as string) ?? tr('This answer failed.')} onRetry={() => regenerate(t, m)} />
                   ) : (
                     <AnswerView answer={m.answer} cropFor={cropFor} onSelect={onSelect} selectedSentence={selectedSentence} fresh={fresh === m.id} />
                   )}
@@ -467,14 +468,14 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                     {canSpeak() && (
                       <button type="button" className="btn btn-quiet btn-sm" onClick={() => listen(m)} aria-pressed={speaking === m.id}>
                         {speaking === m.id ? <Square size={12} strokeWidth={2.4} aria-hidden="true" /> : <Volume2 size={13} strokeWidth={1.8} aria-hidden="true" />}
-                        {speaking === m.id ? ' Stop' : ' Listen'}
+                        {' '}{tr(speaking === m.id ? 'Stop' : 'Listen')}
                       </button>
                     )}
                     <button type="button" className="btn btn-quiet btn-sm" onClick={() => regenerate(t, m)} disabled={busy}>
-                      <RefreshCw size={13} strokeWidth={1.8} aria-hidden="true" /> Run again
+                      <RefreshCw size={13} strokeWidth={1.8} aria-hidden="true" /> {tr('Run again')}
                     </button>
                     <button type="button" className="btn btn-quiet btn-sm" onClick={() => onShare(t.turn)}>
-                      <Share2 size={13} strokeWidth={1.8} aria-hidden="true" /> Share this answer
+                      <Share2 size={13} strokeWidth={1.8} aria-hidden="true" /> {tr('Share this answer')}
                     </button>
                   </footer>
                 )}
@@ -502,9 +503,9 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
 function StreamError({ p, chatId }: { p: Pending; chatId: string }) {
   return (
     <div className={styles.failed} role="alert">
-      <p className={styles.failedHead}><TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" /> No answer was produced, so nothing is shown.</p>
+      <p className={styles.failedHead}><TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" /> {tr('No answer was produced, so nothing is shown.')}</p>
       <p className={styles.failedBody}>{p.error}</p>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => dismissPending(chatId)}>Dismiss</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => dismissPending(chatId)}>{tr('Dismiss')}</button>
     </div>
   )
 }
@@ -512,9 +513,9 @@ function StreamError({ p, chatId }: { p: Pending; chatId: string }) {
 function FailedAnswer({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className={styles.failed} role="alert">
-      <p className={styles.failedHead}><TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" /> No answer was produced, so nothing is shown.</p>
+      <p className={styles.failedHead}><TriangleAlert size={16} strokeWidth={1.8} aria-hidden="true" /> {tr('No answer was produced, so nothing is shown.')}</p>
       <p className={styles.failedBody}>{message}</p>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}><RefreshCw size={13} aria-hidden="true" /> Try again</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}><RefreshCw size={13} aria-hidden="true" /> {tr('Try again')}</button>
     </div>
   )
 }

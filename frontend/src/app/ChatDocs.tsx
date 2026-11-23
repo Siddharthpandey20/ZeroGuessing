@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { FileText, LoaderCircle, Plus, Sparkles, TriangleAlert, Upload, X } from 'lucide-react'
 import type { ChatDoc } from '../lib/types'
 import styles from './ChatDocs.module.css'
+import { tr } from '../lib/i18n'
 
 export const isReady = (d: ChatDoc) => d.ingest_status.startsWith('indexed')
 const isWorking = (d: ChatDoc) => !isReady(d) && d.ingest_status !== 'failed'
@@ -46,12 +47,12 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
       <div ref={panel} className={styles.panel} data-open={open || undefined} role="dialog" aria-modal="false" aria-labelledby="chat-docs-head" tabIndex={-1} inert={!open}>
         <div className={styles.head}>
           <div>
-            <h2 id="chat-docs-head" className={styles.title}>Documents in this chat</h2>
+            <h2 id="chat-docs-head" className={styles.title}>{tr('Documents in this chat')}</h2>
             <p className={styles.sub}>
-              {docs.length === 0 ? 'Answers come only from PDFs you add here.' : `${docs.length} ${docs.length === 1 ? 'document' : 'documents'}${working ? `, ${working} still being read` : ''}. Answers come only from these.`}
+              {docs.length === 0 ? tr('Answers come only from PDFs you add here.') : `${tr(docs.length === 1 ? '{n} document' : '{n} documents', { n: docs.length })}${working ? tr(', {n} still being read', { n: working }) : ''}. ${tr('Answers come only from these.')}`}
             </p>
           </div>
-          <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label="Close documents">
+          <button type="button" className="btn btn-quiet btn-icon btn-sm" onClick={onClose} aria-label={tr('Close documents')}>
             <X size={16} strokeWidth={1.8} />
           </button>
         </div>
@@ -71,8 +72,8 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
               if (files.length) onUpload(files)
             }}>
             {uploading ? <LoaderCircle size={18} className={styles.spin} aria-hidden="true" /> : <Upload size={18} strokeWidth={1.8} aria-hidden="true" />}
-            <span className={styles.dropMain}>{uploading ? 'Uploading' : 'Upload PDFs'}</span>
-            <span className={styles.dropSub}>or drop them here. Born-digital PDFs, up to 40 MB each.</span>
+            <span className={styles.dropMain}>{tr(uploading ? 'Uploading' : 'Upload PDFs')}</span>
+            <span className={styles.dropSub}>{tr('or drop them here. Digital or scanned PDFs, up to 40 MB each.')}</span>
           </button>
 
           {notes.length > 0 && (
@@ -93,10 +94,10 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
                   <span className={styles.docText}>
                     <span className={styles.docTitle} title={d.filename}>{d.title}</span>
                     <span className={styles.docMeta}>
-                      {isReady(d) ? `${d.page_count} ${d.page_count === 1 ? 'page' : 'pages'}, ready` : d.ingest_status === 'failed' ? (d.ingest_error || STATUS.failed) : (STATUS[d.ingest_status] ?? 'Reading the PDF')}
+                      {isReady(d) ? tr(d.page_count === 1 ? '{n} page, ready' : '{n} pages, ready', { n: d.page_count }) : d.ingest_status === 'failed' ? (d.ingest_error || tr(STATUS.failed)) : tr(STATUS[d.ingest_status] ?? 'Reading the PDF')}
                     </span>
                   </span>
-                  <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.remove}`} onClick={() => onRemove(d.id)} aria-label={`Remove ${d.title} from this chat`} title="Remove from this chat">
+                  <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.remove}`} onClick={() => onRemove(d.id)} aria-label={tr('Remove {title} from this chat', { title: d.title })} title={tr('Remove from this chat')}>
                     <X size={14} strokeWidth={1.8} />
                   </button>
                 </li>
@@ -104,16 +105,16 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
             </ul>
           ) : (
             <div className={styles.empty}>
-              <p>No documents yet. Upload your own, or try the demo set: a bank’s loan policy, two amending circulars, a key facts statement, a vendor agreement and an insurance policy.</p>
+              <p>{tr('No documents yet. Upload your own, or try the demo set: a bank’s loan policy, two amending circulars, a key facts statement, a vendor agreement and an insurance policy.')}</p>
               <button type="button" className="btn btn-ghost btn-sm" onClick={onDemo} disabled={uploading}>
-                <Sparkles size={14} strokeWidth={1.8} aria-hidden="true" /> Add the demo documents
+                <Sparkles size={14} strokeWidth={1.8} aria-hidden="true" /> {tr('Add the demo documents')}
               </button>
             </div>
           )}
 
           {docs.length > 0 && (
             <button type="button" className={`btn btn-quiet btn-sm ${styles.more}`} onClick={() => input.current?.click()} disabled={uploading}>
-              <Plus size={14} strokeWidth={2} aria-hidden="true" /> Add more
+              <Plus size={14} strokeWidth={2} aria-hidden="true" /> {tr('Add more')}
             </button>
           )}
         </div>
