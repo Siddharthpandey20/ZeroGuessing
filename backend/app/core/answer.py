@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.amendments import key
 from app.core.contradictions import alert_view, check_evidence
+from app.core.intent import chat_reply, classify, is_followup, overview, resolve_followup
 from app.core.normalise import Value
 from app.core.retrieve import RetrievalResult, retrieve
 from app.core.verify import VerifiedClaim, faithfulness, verify
@@ -62,9 +63,19 @@ def _digits(s: str) -> list[str]:
     return sorted(re.findall(r"\d+(?:[.,]\d+)*", s))
 
 
+def _reply_answer(question: str, reply: str, as_of: date, t0: float) -> dict:
+    """A conversational reply (greeting, thanks, help): no claims, so nothing to verify; the UI marks it as not from
+    the documents."""
+    return {"question": question, "question_en": None, "lang": "hi" if DEVANAGARI.search(question) else "en",
+            "as_of": as_of.isoformat(), "status": "chat", "reply": reply, "searched": {"docs": 0, "terms": [], "evidence": 0},
+            "claims": [], "faithfulness": faithfulness([]), "calculations": [], "contradictions": [], "amendment_chains": [],
+            "abstention": None, "timings_ms": {"total": int((time.perf_counter() - t0) * 1000)}, "cached": False}
+
+
 async def answer_question(session: AsyncSession, question: str, as_of: date, use_cache: bool = True,
-                          doc_ids: list[str] | None = None) -> AsyncIterator[dict]:
-    """The full pipeline. `doc_ids`: answer only from these documents (a chat's own); None searches every active one."""
+                          doc_ids: list[str] | None = None, history: list[dict] | None = None) -> AsyncIterator[dict]:
+    """The full pipeline. `doc_ids`: answer only from these documents (a chat's own); None searches every active one.
+    `history`: earlier turns of the chat ({question, answer}), used to understand a follow-up question."""
     t0 = time.perf_counter()
     timings: dict[str, int] = {}
 
@@ -74,6 +85,12 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
         return now
 
     s = get_settings()
+    asked = question
+    kind = classify(question)
+    if kind in ("smalltalk", "help"):
+        reply = chat_reply(question, kind, len(doc_ids) if doc_ids is not None else None)
+        yield {"type": "answer", "answer": _reply_answer(question, reply, as_of, t0)}
+        return
     if doc_ids is not None and not doc_ids:
         r = RetrievalResult([], {}, None, 0, [], 0)
         yield {"type": "answer", "answer": {
@@ -82,6 +99,24 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
             **_abstain(r, [], ["this chat has no documents yet: upload a PDF to the chat, then ask again"]),
             "timings_ms": {"total": int((time.perf_counter() - t0) * 1000)}}}
         return
+    if kind == "overview":
+        claims, n_docs = await overview(session, doc_ids)
+        if not claims:
+            reply = "Your documents are still being read. Ask again in a moment."
+            yield {"type": "answer", "answer": _reply_answer(question, reply, as_of, t0)}
+            return
+        yield {"type": "answer", "answer": {
+            "question": question, "question_en": None, "lang": "hi" if DEVANAGARI.search(question) else "en",
+            "as_of": as_of.isoformat(), "status": "answered", "overview": True,
+            "searched": {"docs": n_docs, "terms": [], "evidence": sum(len(c["citations"]) for c in claims)},
+            "claims": claims, "faithfulness": {"supported": len(claims), "total": len(claims), "pct": 100.0, "blocked": 0},
+            "calculations": [], "contradictions": [], "amendment_chains": [], "abstention": None,
+            "timings_ms": {"total": int((time.perf_counter() - t0) * 1000)}, "cached": False}}
+        return
+    resolved = None
+    if history and is_followup(question):
+        resolved = await resolve_followup(question, history)
+        question = resolved  # search, draft and verify against the standalone question; the user's words stay on screen
     scope = ",".join(sorted(doc_ids)) if doc_ids is not None else "*"
     cache_key = hashlib.sha256(f"{question.strip().lower()}|{as_of}|{scope}|{await corpus_version(session)}".encode()).hexdigest()
     if use_cache and s.answer_cache and (hit := await session.get(AnswerCache, cache_key)):
@@ -103,7 +138,7 @@ async def answer_question(session: AsyncSession, question: str, as_of: date, use
     r = await retrieve(session, question, as_of, search_text=q_en, doc_ids=doc_ids)
     t = tick("retrieve", t)
 
-    base = {"question": question, "question_en": q_en if lang == "hi" else None, "lang": lang, "as_of": as_of.isoformat(),
+    base = {"question": asked, "question_resolved": resolved, "question_en": q_en if lang == "hi" else None, "lang": lang, "as_of": as_of.isoformat(),
             "searched": {"docs": r.docs_searched, "terms": r.terms, "evidence": len(r.evidence)}}
 
     gate_fail = not r.evidence or (r.best_dense is not None and r.best_dense < s.min_dense_score and r.fts_hits == 0)

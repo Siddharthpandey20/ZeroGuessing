@@ -73,10 +73,11 @@ export default function Landing() {
   const copyRef = useRef<HTMLDivElement>(null)
   const actionsRef = useRef<HTMLDivElement>(null)
   const specRef = useRef<HTMLDivElement>(null)
+  const markRef = useRef<HTMLDivElement>(null)
   // the answer card waits, hidden, until it grows out of the monitor in the hero scene
   const [specHeld, setSpecHeld] = useState(true)
   const onSpecRevealed = useCallback(() => setSpecHeld(false), [])
-  const sceneAnchors = useMemo(() => ({ hero: heroRef, copy: copyRef, actions: actionsRef, spec: specRef }), [])
+  const sceneAnchors = useMemo(() => ({ hero: heroRef, copy: copyRef, actions: actionsRef, spec: specRef, mark: markRef }), [])
 
   return (
     <div className={styles.page}>
@@ -109,7 +110,7 @@ export default function Landing() {
             </div>
           </nav>
 
-          <div className={styles.mark}>
+          <div ref={markRef} className={styles.mark}>
             <Wordmark play={play} />
           </div>
 

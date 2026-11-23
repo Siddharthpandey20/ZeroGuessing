@@ -14,6 +14,7 @@ export const STATUS_LABEL: Record<string, string> = {
   partial: 'Partly answered',
   conflicted: 'The documents conflict',
   abstained: 'No proof found',
+  chat: 'Reply',
 }
 
 export function fmtDate(iso: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }) {

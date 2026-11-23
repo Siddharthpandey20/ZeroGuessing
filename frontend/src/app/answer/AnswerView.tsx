@@ -62,16 +62,32 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
   const selectCitation = (c: Citation) => onSelect?.({ kind: 'citation', citation: c, highlight: [c.sentence_id] })
   const hasNotices = answer.contradictions.length > 0 || chains.length > 0 || blocked.length > 0
 
+  // a conversational reply (greeting, thanks, help): plain text, plainly marked as not from the documents
+  if (answer.status === 'chat')
+    return (
+      <div className={styles.answer} data-status="chat" data-fresh={fresh || undefined}>
+        <p className={styles.prose}>{answer.reply}</p>
+        <footer className={styles.foot}>
+          <p className={styles.footLine}><span>A reply, not from your documents. Ask a question to get quoted proof.</span></p>
+        </footer>
+      </div>
+    )
+
   return (
     <div className={styles.answer} data-status={answer.status} data-fresh={fresh || undefined}>
+      {answer.question_resolved && (
+        <p className={styles.readAs}><span>Read as:</span> {answer.question_resolved}</p>
+      )}
+      {answer.overview && <p className={styles.readAs}>An overview built from the documents themselves: their section headings, or their opening line.</p>}
       {abstained && answer.abstention && (
         <Abstention answer={answer} cropFor={cropFor} selectedSentence={selectedSentence} onCite={selectCitation} />
       )}
 
       {shown.length > 0 && (
-        <p className={styles.prose} lang={hindi ? 'hi' : undefined}>
+        // an overview is one line per document, so it reads as a list; an answer reads as prose
+        <ProseOrList list={!!answer.overview} lang={hindi ? 'hi' : undefined}>
           {shown.map((c, i) => (
-            <span key={i} className={styles.claimWrap}>
+            <ItemOf key={i} list={!!answer.overview}>
               <span className={styles.claim} data-verdict={c.verdict} data-active={c.citations.some((x) => x.sentence_id === selectedSentence) || undefined}>
                 {endWithStop(hindi && c.text_hi ? c.text_hi : c.text)}
               </span>
@@ -82,9 +98,9 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
                     active={selectedSentence === cit.sentence_id} onSelect={() => selectCitation(cit)} />
                 )
               })}{' '}
-            </span>
+            </ItemOf>
           ))}
-        </p>
+        </ProseOrList>
       )}
 
       {hindi && shown.some((c) => c.text_hi) && (
@@ -149,6 +165,14 @@ export function AnswerView({ answer, cropFor, onSelect, selectedSentence, fresh 
       <Footer answer={answer} refs={refs} selectedSentence={selectedSentence} onCite={selectCitation} />
     </div>
   )
+}
+
+function ProseOrList({ list, lang, children }: { list: boolean; lang?: string; children: React.ReactNode }) {
+  return list ? <ul className={styles.overview} lang={lang}>{children}</ul> : <p className={styles.prose} lang={lang}>{children}</p>
+}
+
+function ItemOf({ list, children }: { list: boolean; children: React.ReactNode }) {
+  return list ? <li className={styles.claimWrap}>{children}</li> : <span className={styles.claimWrap}>{children}</span>
 }
 
 function conflictLine(x: Conflict) {

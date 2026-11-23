@@ -96,7 +96,8 @@ export interface Abstention {
   message: string
 }
 
-export type AnswerStatus = 'answered' | 'partial' | 'conflicted' | 'abstained'
+/** chat: a conversational reply (greeting, thanks, help) with no claims; shown as not from the documents. */
+export type AnswerStatus = 'answered' | 'partial' | 'conflicted' | 'abstained' | 'chat'
 
 export interface Answer {
   question: string
@@ -113,6 +114,12 @@ export interface Answer {
   abstention: Abstention | null
   timings_ms: Record<string, number>
   cached?: boolean
+  /** status chat: the reply text */
+  reply?: string
+  /** a follow-up, as it was understood from the earlier turns */
+  question_resolved?: string | null
+  /** answered with an overview built from the documents' own headings */
+  overview?: boolean
   error?: string
 }
 

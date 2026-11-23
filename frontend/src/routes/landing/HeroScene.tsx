@@ -18,6 +18,7 @@ interface Anchors {
   copy: RefObject<HTMLElement | null>
   actions: RefObject<HTMLElement | null>
   spec: RefObject<HTMLElement | null>
+  mark?: RefObject<HTMLElement | null> // the big wordmark: the opening scene stays below it
 }
 
 /** Where text actually ends (a block's own box is as wide as its column). */
@@ -68,11 +69,17 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     const top = act.bottom - H.top - height
     setBox({ left, top, width })
 
-    // the opening: large, centred under the wordmark
+    // the opening: as large as the free space allows, never over text. While the answer card is still hidden that
+    // space is right of the headline and below the wordmark (on phones: below the buttons, within the first screen).
     const wide = window.innerWidth > 768
-    const wi = wide ? Math.min(H.width * 0.6, 860) : H.width * 0.92
-    const cx = H.width / 2
-    const cy = (wide ? H.height : Math.min(H.height, window.innerHeight)) * (wide ? 0.6 : 0.58)
+    const markBottom = anchors.mark?.current?.getBoundingClientRect().bottom ?? H.top + H.height * 0.35
+    const free = wide
+      ? { l: textRight + 32, r: H.right - 32, t: markBottom + 40, b: H.bottom - 28 } // +40: the "g" hangs below its box
+      : { l: H.left + 12, r: H.right - 12, t: act.bottom + 20, b: Math.min(H.bottom, window.innerHeight) - 16 }
+    const fitW = Math.min(free.r - free.l, ((free.b - free.t) * VB.w) / VB.h, 900)
+    const wi = Math.max(width, fitW)
+    const cx = (free.l + free.r) / 2 - H.left
+    const cy = (free.t + free.b) / 2 - H.top
     setFrom(`translate(${cx - (left + width / 2)}px, ${cy - (top + height / 2)}px) scale(${wi / width})`)
   }, [anchors])
 

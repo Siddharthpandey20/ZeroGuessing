@@ -140,6 +140,9 @@ def render_snapshot_html(snap: dict) -> str:
         a = t["answer"] or {}
         f = a.get("faithfulness") or {}
         parts.append(f"<div class='q'>Q{t['turn']}. {e(t['question'])} <span class='score'>(as of {e(t['as_of'])})</span></div>")
+        if a.get("status") == "chat":  # a conversational reply: nothing quoted, nothing to score
+            parts.append(f"<div class='claim'>{e(a.get('reply', ''))} <span class='score'>(a reply, not from the documents)</span></div>")
+            continue
         parts.append(f"<div class='score'>Faithfulness: {f.get('supported', 0)}/{f.get('total', 0)} claims backed by a quote "
                      f"({f.get('pct', 0)}%), {f.get('blocked', 0)} blocked</div>")
         for cl in a.get("claims", []):

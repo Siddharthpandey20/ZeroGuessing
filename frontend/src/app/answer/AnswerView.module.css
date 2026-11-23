@@ -17,6 +17,12 @@
 .answer[data-fresh] .prose { animation: enter 420ms var(--ease-out) both; }
 @keyframes enter { from { opacity: 0; transform: translateY(6px); } }
 .original { font-size: var(--text-sm); color: var(--color-ink-2); line-height: 1.6; }
+/* how a follow-up was understood, or where an overview came from: one quiet line above the answer */
+.readAs { font-size: var(--text-xs); color: var(--color-muted); line-height: 1.5; }
+.readAs span { font-weight: 600; color: var(--color-ink-2); }
+/* an overview: one document per line */
+.overview { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-sm); font-size: 1rem; line-height: 1.6; color: var(--color-ink); max-width: 68ch; }
+.overview li { padding-left: var(--space-md); border-left: 2px solid var(--color-rule); }
 
 /* quiet text buttons used by notices and disclosures */
 .link {

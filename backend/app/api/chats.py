@@ -142,13 +142,34 @@ async def delete_chat(chat_id: str, p: Principal = Depends(get_principal), sessi
     await session.commit()
 
 
+def _answer_text(a: dict | None) -> str:
+    """What an earlier answer said, in a few sentences, for understanding a follow-up."""
+    if not a:
+        return ""
+    if a.get("reply"):
+        return a["reply"]
+    said = [c["text"] for c in a.get("claims", []) if c.get("verdict") in ("supported", "conflicted")]
+    return " ".join(said) or (a.get("abstention") or {}).get("message", "")
+
+
+async def _history(session: AsyncSession, chat_id: str, before_turn: int, keep: int = 3) -> list[dict]:
+    """The latest finished version of each earlier turn, oldest first."""
+    rows = (await session.execute(select(Message).where(Message.chat_id == chat_id, Message.turn < before_turn,
+                                                        Message.status == "done").order_by(Message.turn, Message.version))).scalars()
+    latest: dict[int, Message] = {}
+    for r in rows:
+        latest[r.turn] = r
+    return [{"question": r.question, "answer": _answer_text(r.answer)} for _, r in sorted(latest.items())][-keep:]
+
+
 async def _run(msg_id: str, use_cache: bool = True):
     """Stream the pipeline for one stored message; persist the final answer. Uses its own session (SSE outlives request)."""
     async with SessionLocal() as session:
         m = await session.get(Message, msg_id)
         try:
             doc_ids = await _scope(session, await session.get(Chat, m.chat_id))
-            async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids):
+            history = await _history(session, m.chat_id, m.turn)
+            async for ev in answer_question(session, m.question, m.as_of, use_cache=use_cache, doc_ids=doc_ids, history=history):
                 if ev["type"] == "answer":
                     m.answer, m.status = ev["answer"], "done"
                     await session.commit()
