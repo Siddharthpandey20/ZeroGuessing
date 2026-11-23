@@ -70,6 +70,14 @@
 .lead { font-size: var(--text-lead); line-height: 1.45; color: var(--color-ink-2); max-width: 34ch; opacity: 0; transition: opacity 900ms ease 1300ms; }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); opacity: 0; transform: translateY(12px); transition: opacity 800ms ease 1450ms, transform 900ms var(--ease-out) 1450ms; }
 .hero[data-play] .lead, .hero[data-play] .actions { opacity: 1; transform: none; }
+.proofs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, max-content); gap: 8px var(--space-lg); font-size: var(--text-sm); color: var(--color-ink-2); opacity: 0; transition: opacity 900ms ease 1700ms; }
+.proofs li { display: inline-flex; align-items: center; gap: 8px; }
+.proofs li::before { content: ""; flex: none; width: 9px; height: 9px; border-radius: 2px; background: var(--color-accent-2); box-shadow: inset 0 0 0 1px var(--color-ink-a14); }
+.proofs li[data-k="conflict"]::before { background: var(--color-conflict); }
+.proofs li[data-k="blocked"]::before { background: transparent; box-shadow: none; height: 2px; border-radius: 1px; background: var(--color-blocked); }
+.proofs li[data-k="seal"]::before { background: var(--color-ink); box-shadow: none; }
+.hero[data-play] .proofs { opacity: 1; }
+@media (max-width: 720px) { .proofs { grid-template-columns: minmax(0, 1fr); } }
 
 /* ================= index bars ================= */
 .indexBar { position: relative; max-width: var(--container); margin: var(--section-gap-s) auto 0; padding: 0 var(--gutter) var(--space-lg); display: grid; grid-template-columns: 1fr auto 1fr; font-size: var(--text-sm); font-weight: 600; color: var(--color-ink); }

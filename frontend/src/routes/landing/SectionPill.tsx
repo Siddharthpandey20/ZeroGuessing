@@ -3,6 +3,14 @@ import { useEffect, useState } from 'react'
 /** wembi's floating pill, bottom left: always says which part of the page you are in. */
 export function SectionPill() {
   const [label, setLabel] = useState<string | null>(null)
+  // hidden on the hero itself: you are obviously at the start, and it would sit on the hero's proof points
+  const [past, setPast] = useState(false)
+  useEffect(() => {
+    const on = () => setPast(window.scrollY > window.innerHeight * 0.6)
+    on()
+    window.addEventListener('scroll', on, { passive: true })
+    return () => window.removeEventListener('scroll', on)
+  }, [])
   useEffect(() => {
     const els = Array.from(document.querySelectorAll<HTMLElement>('[data-section]'))
     if (!els.length) return
@@ -17,7 +25,7 @@ export function SectionPill() {
     return () => io.disconnect()
   }, [])
   return (
-    <div className="section-pill" data-on={label ? 'true' : undefined} aria-hidden="true">
+    <div className="section-pill" data-on={label && past ? 'true' : undefined} aria-hidden="true">
       <span className="section-pill-dot" />
       <span className="section-pill-text" key={label ?? ''}>{label ?? ''}</span>
     </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router'
 import Lenis from 'lenis'
 import { ArrowUpRight } from 'lucide-react'
@@ -121,7 +121,8 @@ export default function Landing() {
             <div ref={copyRef} className={styles.heroCopy}>
               <h1 className={styles.h1} data-play={play || undefined}>
                 {'Every answer arrives with its proof.'.split(' ').map((w, i) => (
-                  <span key={i} className={styles.h1Word}><span style={{ '--d': `${700 + i * 70}ms` } as CSSProperties}>{w}</span>{' '}</span>
+                  // the space sits between the word boxes: inside an inline-block it collapses ("Everyanswer")
+                  <Fragment key={i}><span className={styles.h1Word}><span style={{ '--d': `${700 + i * 70}ms` } as CSSProperties}>{w}</span></span>{' '}</Fragment>
                 ))}
               </h1>
               <p className={styles.lead}>Ask across your loan agreements and circulars. Unproven claims are struck out.</p>
@@ -131,6 +132,13 @@ export default function Landing() {
                 </Link>
                 <a href="#checks" className="btn btn-hud">How it checks</a>
               </div>
+              {/* what the product promises, in its own verdict colours: the same marks the answers use */}
+              <ul className={styles.proofs} aria-label="What every answer guarantees">
+                <li data-k="proof">Every sentence cited to its page</li>
+                <li data-k="conflict">Disagreements shown side by side</li>
+                <li data-k="blocked">“No proof” instead of a guess</li>
+                <li data-k="seal">Reports signed and verifiable</li>
+              </ul>
             </div>
             <div ref={specRef} className={styles.heroSpecimen} data-held={specHeld || undefined}>
               <div ref={tilt} className={styles.tilt}>
