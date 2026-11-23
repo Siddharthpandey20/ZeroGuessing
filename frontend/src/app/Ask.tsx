@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Camera, ChevronLeft, ChevronRight, Files, Mic, PanelLeft, Pencil, Plus, RefreshCw, Share2, Sparkles, Square, Trash2, TriangleAlert, Upload, Volume2 } from 'lucide-react'
+import { Camera, Check, ChevronLeft, ChevronRight, Copy, Files, Mic, PanelLeft, Pencil, Plus, RefreshCw, Share2, Sparkles, Square, Trash2, TriangleAlert, Upload, Volume2 } from 'lucide-react'
 import { api, ApiError, cropUrl, del, patch, post } from '../lib/api'
 import { canSpeak, speak, spokenAnswer, stopSpeaking } from '../lib/speech'
-import type { ChatDetail, ChatDoc, ChatSummary, Message, Turn, UploadResult } from '../lib/types'
+import type { Answer, ChatDetail, ChatDoc, ChatSummary, Message, Turn, UploadResult } from '../lib/types'
 import { AnswerView } from './answer/AnswerView'
 import { LiveTrace } from './answer/WorkTrace'
 import { fmtDate, type Selection } from './answer/selection'
@@ -16,6 +16,47 @@ import { ShareDialog } from './ShareDialog'
 import { consumeSpeak, dismissPending, runAnswer, stopAnswer, takeFresh, usePending, type Pending } from './askStore'
 import styles from './Ask.module.css'
 import { tr } from '../lib/i18n'
+
+/** The answer as plain text for the clipboard: what is shown on screen (in the answer's language), each claim with
+ * its source, so the copied text keeps its proof. Blocked claims are left out, as they are not part of the answer. */
+function answerText(a: Answer): string {
+  if (a.status === 'chat') return a.reply ?? ''
+  const hindi = a.lang === 'hi' || a.lang === 'hne'
+  const lines = [a.question.trim(), '']
+  const shown = a.claims.filter((c) => c.verdict === 'supported' || c.verdict === 'conflicted')
+  for (const c of shown) {
+    const src = [...new Map(c.citations.map((x) => {
+      const ref = x.clause_ref && !x.clause_ref.startsWith('_') ? `, ${x.clause_ref}` : ''
+      const s = `${x.doc_title}${ref}, p.${x.page}`
+      return [s, s] as const
+    })).values()]
+    lines.push(`• ${((hindi && c.text_hi) || c.text).trim()}${src.length ? ` [${src.join('; ')}]` : ''}`)
+  }
+  if (a.abstention?.message) lines.push(...(shown.length ? [''] : []), a.abstention.message)
+  return lines.join('\n').trim()
+}
+
+/** Clipboard API where allowed (https, localhost); otherwise a hidden textarea, e.g. a phone opening the dev server
+ * by its LAN address over plain http. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* fall through */ }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try { ok = document.execCommand('copy') } catch { ok = false }
+  ta.remove()
+  return ok
+}
 
 const SUGGESTIONS = [
   'What is the prepayment penalty on a floating-rate home loan today?',
@@ -407,6 +448,15 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
     first.current = false
   }, [count])
 
+  const [copied, setCopied] = useState<string | null>(null)
+  const copy = async (m: Message) => {
+    if (!m.answer) return
+    if (await copyText(answerText(m.answer))) {
+      setCopied(m.id)
+      window.setTimeout(() => setCopied((x) => (x === m.id ? null : x)), 2000)
+    }
+  }
+
   const listen = (m: Message) => {
     if (!m.answer) return
     if (speaking === m.id) {
@@ -530,6 +580,10 @@ function Thread({ chatId, detail, loading, error, pending, selection, onSelect, 
                         {' '}{tr(speaking === m.id ? 'Stop' : 'Listen')}
                       </button>
                     )}
+                    <button type="button" className="btn btn-quiet btn-sm" onClick={() => void copy(m)} aria-live="polite">
+                      {copied === m.id ? <Check size={13} strokeWidth={2.2} aria-hidden="true" /> : <Copy size={13} strokeWidth={1.8} aria-hidden="true" />}
+                      {' '}{tr(copied === m.id ? 'Copied' : 'Copy')}
+                    </button>
                     <button type="button" className="btn btn-quiet btn-sm" onClick={() => regenerate(t, m)} disabled={busy}>
                       <RefreshCw size={13} strokeWidth={1.8} aria-hidden="true" /> {tr('Run again')}
                     </button>
