@@ -43,6 +43,8 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
   const settledRef = useRef(false)
   const revealed = useRef(false)
   const screenRef = useRef<HTMLDivElement>(null)
+  const linksRef = useRef<SVGSVGElement>(null)
+  const [linked, setLinked] = useState(false)
 
   const measure = useCallback(() => {
     const hero = anchors.hero.current, copy = anchors.copy.current, actions = anchors.actions.current, spec = anchors.spec.current
@@ -89,6 +91,33 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     }
   }, [measure])
 
+  /**
+   * Two dotted lines from the small screen to the card it opened into: screen's right edge to the card's left edge
+   * (card beside the scene), or screen's bottom edge to the card's top (card below it, on phones). Follows the card's
+   * live box, including the part still cropped by the growing clip, so the lines stretch out of the screen with it.
+   */
+  const drawLinks = useCallback(() => {
+    const svg = linksRef.current, hero = anchors.hero.current, spec = anchors.spec.current, screen = screenRef.current
+    if (!svg || !hero || !spec || !screen) return
+    const H = hero.getBoundingClientRect(), S = screen.getBoundingClientRect(), R = spec.getBoundingClientRect()
+    const scale = spec.offsetWidth ? R.width / spec.offsetWidth : 1
+    const crop = /inset\(\s*-?[\d.]+px\s+-?[\d.]+px\s+(-?[\d.]+)px/.exec(getComputedStyle(spec).clipPath)
+    const bottom = R.bottom - (crop ? Math.max(0, parseFloat(crop[1])) * scale : 0)
+    const beside = R.left >= S.right - 2
+    const pairs = beside
+      ? [[S.right, S.top, R.left, R.top], [S.right, S.bottom, R.left, bottom]]
+      : [[S.left, S.bottom, R.left, R.top], [S.right, S.bottom, R.right, R.top]]
+    svg.querySelectorAll('line').forEach((l, i) => {
+      const [x1, y1, x2, y2] = pairs[i]
+      l.setAttribute('x1', String(x1 - H.left)); l.setAttribute('y1', String(y1 - H.top))
+      l.setAttribute('x2', String(x2 - H.left)); l.setAttribute('y2', String(y2 - H.top))
+    })
+    svg.querySelectorAll('circle').forEach((c, i) => {
+      const [x1, y1] = pairs[i]
+      c.setAttribute('cx', String(x1 - H.left)); c.setAttribute('cy', String(y1 - H.top))
+    })
+  }, [anchors])
+
   /** FLIP the card from the small screen's box to its own: same top crop, so it reads as the screen opening up. */
   const reveal = useCallback(() => {
     const spec = anchors.spec.current, screen = screenRef.current
@@ -98,8 +127,20 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
       spec.style.transition = spec.style.transform = spec.style.clipPath = spec.style.transformOrigin = ''
       spec.style.opacity = '1' // stays inline: the card is shown from here on, whatever the hero's own reveal says
       onRevealed()
+      requestAnimationFrame(drawLinks)
     }
-    if (!screen || reducedMotion()) return clear()
+    if (!screen || reducedMotion()) {
+      setLinked(true)
+      return clear()
+    }
+    // track the card every frame while it grows, so the lines stretch with it
+    const until = performance.now() + GROW_MS + 120
+    const follow = () => {
+      drawLinks()
+      if (performance.now() < until) requestAnimationFrame(follow)
+    }
+    requestAnimationFrame(follow)
+    setLinked(true)
     spec.style.transition = 'none'
     spec.style.transform = 'none'
     const C = spec.getBoundingClientRect()
@@ -116,7 +157,23 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     spec.style.transform = 'none'
     spec.style.clipPath = 'inset(-80px -80px -80px -80px round 0px)' // past the card, so its shadow is not cut
     window.setTimeout(clear, GROW_MS + 60)
-  }, [anchors, onRevealed])
+  }, [anchors, onRevealed, drawLinks])
+
+  // keep the lines on the card and screen when the layout changes
+  useEffect(() => {
+    if (!linked) return
+    let t = 0
+    const onResize = () => {
+      clearTimeout(t)
+      t = window.setTimeout(() => requestAnimationFrame(drawLinks), 200) // after the scene has re-measured
+    }
+    window.addEventListener('resize', onResize)
+    void document.fonts?.ready.then(() => requestAnimationFrame(drawLinks))
+    return () => {
+      window.removeEventListener('resize', onResize)
+      clearTimeout(t)
+    }
+  }, [linked, drawLinks])
 
   useEffect(() => {
     if (!play || settledRef.current) return
@@ -139,6 +196,11 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
     : { visibility: 'hidden' }
 
   return (
+    <>
+    <svg ref={linksRef} className={styles.links} data-on={linked || undefined} aria-hidden="true">
+      <line /><line />
+      <circle r="2.5" /><circle r="2.5" />
+    </svg>
     <div className={styles.scene} style={style} data-play={play || undefined} data-settled={settled || undefined} aria-hidden="true">
       <div className={styles.frame}>
         <SceneBack />
@@ -152,6 +214,7 @@ export function HeroScene({ play, anchors, onRevealed }: { play: boolean; anchor
         <SceneFront />
       </div>
     </div>
+    </>
   )
 }
 

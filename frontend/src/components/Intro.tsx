@@ -3,22 +3,17 @@ import { reducedMotion } from '../lib/motion'
 import styles from './Intro.module.css'
 
 const LINE = 'Every claim needs a source.'
-const KEY = 'zg-intro-seen'
 
-function seen() {
-  try {
-    return sessionStorage.getItem(KEY) === '1'
-  } catch {
-    return true
-  }
-}
+// Plays on every fresh load of the site (a reload or a new visit), but not again when the landing page is reached
+// by navigating inside the app without reloading: this module state lives exactly as long as the page does.
+let playedThisLoad = false
 
 /**
  * echo's opening: a line types itself, the wordmark draws in outline and fills, then the curtain lifts.
- * Once per session, about 2.6 s, skipped by any click or key, never shown under reduced motion.
+ * Once per page load, about 2.6 s, skipped by any click or key, never shown under reduced motion.
  */
 export function Intro({ onDone }: { onDone: () => void }) {
-  const [state, setState] = useState<'off' | 'run' | 'lift'>(() => (seen() || reducedMotion() ? 'off' : 'run'))
+  const [state, setState] = useState<'off' | 'run' | 'lift'>(() => (playedThisLoad || reducedMotion() ? 'off' : 'run'))
 
   useEffect(() => {
     if (state === 'off') {
@@ -26,11 +21,7 @@ export function Intro({ onDone }: { onDone: () => void }) {
       return
     }
     if (state !== 'run') return
-    try {
-      sessionStorage.setItem(KEY, '1')
-    } catch {
-      /* private mode */
-    }
+    playedThisLoad = true
     const lift = window.setTimeout(() => setState('lift'), 2350)
     const skip = () => setState('lift')
     window.addEventListener('keydown', skip, { once: true })
