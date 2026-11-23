@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { FileText, LoaderCircle, Plus, Sparkles, TriangleAlert, Upload, X } from 'lucide-react'
+import { Link } from 'react-router'
+import { EyeOff, FileText, LoaderCircle, Plus, ShieldQuestion, Sparkles, TriangleAlert, Upload, X } from 'lucide-react'
 import type { ChatDoc } from '../lib/types'
 import styles from './ChatDocs.module.css'
 import { tr } from '../lib/i18n'
@@ -73,7 +74,7 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
             }}>
             {uploading ? <LoaderCircle size={18} className={styles.spin} aria-hidden="true" /> : <Upload size={18} strokeWidth={1.8} aria-hidden="true" />}
             <span className={styles.dropMain}>{tr(uploading ? 'Uploading' : 'Upload PDFs')}</span>
-            <span className={styles.dropSub}>{tr('or drop them here. Digital or scanned PDFs, up to 40 MB each.')}</span>
+            <span className={styles.dropSub}>{tr('or drop them here. Up to 5 PDFs (30 MB in all), 100 pages each.')}</span>
           </button>
 
           {notes.length > 0 && (
@@ -96,6 +97,7 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
                     <span className={styles.docMeta}>
                       {isReady(d) ? tr(d.page_count === 1 ? '{n} page, ready' : '{n} pages, ready', { n: d.page_count }) : d.ingest_status === 'failed' ? (d.ingest_error || tr(STATUS.failed)) : tr(STATUS[d.ingest_status] ?? 'Reading the PDF')}
                     </span>
+                    <DocNotes d={d} />
                   </span>
                   <button type="button" className={`btn btn-quiet btn-icon btn-sm ${styles.remove}`} onClick={() => onRemove(d.id)} aria-label={tr('Remove {title} from this chat', { title: d.title })} title={tr('Remove from this chat')}>
                     <X size={14} strokeWidth={1.8} />
@@ -119,6 +121,33 @@ export function ChatDocs({ open, onClose, docs, loading, uploading, notes, onUpl
           )}
         </div>
       </div>
+    </>
+  )
+}
+
+/** What was left out when the PDF was read, and changes it makes that wait for the user's confirmation. */
+function DocNotes({ d }: { d: ChatDoc }) {
+  const hidden = d.hidden_text_ignored ?? 0
+  const odd = d.suspicious_text_ignored ?? 0
+  const pending = d.n_amendments_proposed ?? 0
+  if (!hidden && !odd && !pending) return null
+  return (
+    <>
+      {(hidden > 0 || odd > 0) && (
+        <span className={styles.docWarn}>
+          <EyeOff size={12} strokeWidth={2} aria-hidden="true" />
+          {[
+            hidden > 0 ? tr(hidden === 1 ? '{n} hidden passage ignored' : '{n} hidden passages ignored', { n: hidden }) : '',
+            odd > 0 ? tr(odd === 1 ? '{n} instruction-like sentence ignored' : '{n} instruction-like sentences ignored', { n: odd }) : '',
+          ].filter(Boolean).join(', ')}
+        </span>
+      )}
+      {pending > 0 && (
+        <Link className={styles.docWarn} to={`/app/library/${d.id}`}>
+          <ShieldQuestion size={12} strokeWidth={2} aria-hidden="true" />
+          {tr(pending === 1 ? '{n} change needs your confirmation' : '{n} changes need your confirmation', { n: pending })}
+        </Link>
+      )}
     </>
   )
 }

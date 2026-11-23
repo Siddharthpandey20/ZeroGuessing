@@ -10,7 +10,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.contradictions import alert_view
+from app.core.access import charge
 from app.core.retrieve import retrieve
+from app.core.sanitize import clean_ai_text
 from app.db import get_session
 from app.llm.gemini import get_llm
 from app.models import Contradiction, Sentence
@@ -21,13 +23,17 @@ _MIME = {"image/png", "image/jpeg", "image/webp"}
 
 
 @router.post("/camera/transcribe")
-async def transcribe(image: UploadFile = File(...)):
+async def transcribe(image: UploadFile = File(...), p: Principal = Depends(get_principal),
+                     session: AsyncSession = Depends(get_session)):
     if image.content_type not in _MIME:
         raise HTTPException(415, "send a PNG, JPEG or WebP image")
     data = await image.read()
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(413, "image too large")
-    text = await get_llm().read_image(data, image.content_type)
+    await charge(session, p, "camera")  # S6: a model call per photo, 429 past the daily limit
+    await session.commit()
+    # S5: what the photo says, so contacts stay; markup and invisible characters go. The user edits it before use.
+    text = clean_ai_text(await get_llm().read_image(data, image.content_type), None, max_len=4000)
     return {"text": text, "note": "Check and edit the text before sending it; reading errors must not become the question."}
 
 

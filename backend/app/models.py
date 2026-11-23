@@ -53,6 +53,10 @@ class Document(Base):
     ingest_status: Mapped[str] = mapped_column(String(24), default="queued")  # queued|parsing|embedding|indexed|failed
     ingest_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # text left out when the PDF was read (S2): spans a reader can't see (white-on-white, invisible, transparent,
+    # microscopic, covered) and sentences that read as instructions to an AI ("ignore previous instructions...")
+    hidden_text_ignored: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    suspicious_text_ignored: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class Clause(Base):
@@ -115,6 +119,8 @@ class Amendment(Base):
     trigger_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(16), default="proposed")  # proposed|confirmed|rejected
+    # why it was not applied automatically (S3): a person has to confirm it. None = it passed every check.
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -243,3 +249,13 @@ class Report(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     signature: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class UsageEvent(Base):
+    """One metered action by a signed-in user (S6): kind = question | camera | upload. Counted per UTC day; kept when
+    a chat is deleted, so deleting chats doesn't reset the day's allowance."""
+    __tablename__ = "usage_events"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)

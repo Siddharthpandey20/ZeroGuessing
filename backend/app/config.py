@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # distinct documents linked to their chats, demo documents excluded: removing a PDF from every chat frees its slot.
     max_user_documents: int = 5
     max_user_upload_mb: int = 30
+    max_pdf_pages: int = 100  # every upload, admins included: parsing and embedding cost grow with pages
+    # daily usage per signed-in non-admin user (UTC day). Model calls are what cost money: questions (ask, edit, run
+    # again), photos read by the camera, and PDFs added (new files: a re-link of one they already have is free).
+    max_daily_questions: int = 50
+    max_daily_camera: int = 20
+    max_daily_uploads: int = 20
     amend_autoconfirm: float = 0.8  # amendments below this confidence (or unresolved target) wait for a human
     max_evidence: int = 40  # sentences sent to the drafter
     answer_cache: bool = True

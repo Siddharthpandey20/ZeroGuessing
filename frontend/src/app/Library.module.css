@@ -90,3 +90,5 @@
   .main { padding: var(--space-lg) var(--space-md) var(--space-xl); }
 }
 @media (prefers-reduced-motion: reduce) { .status[data-s="busy"]::before { animation: none; } }
+
+.amendWhy { font-size: var(--text-2xs); color: var(--color-conflict-ink); }

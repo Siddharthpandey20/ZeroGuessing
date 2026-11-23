@@ -9,15 +9,17 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.documents import UploadResult, store_uploads, user_usage
+from app.api.documents import UploadResult, store_uploads, user_quota
+from app.core.access import charge
+from app.core.sanitize import clean_ai_text
 from app.core.answer import answer_question
 from app.db import SessionLocal, get_session
 from app.llm.gemini import get_llm
-from app.models import Chat, ChatDocument, Document, Message, _id
+from app.models import Amendment, Chat, ChatDocument, Document, Message, UsageEvent, _id
 from app.security import Principal, get_principal
 
 router = APIRouter(tags=["chats"])
@@ -82,6 +84,8 @@ async def _auto_title(chat_id: str, question: str, placeholder: str) -> None:
     except Exception as e:  # fake model, no key, or a slow model: the instant name stays
         log.info("auto title skipped: %s", e)
         return
+    # S5: a name is shown in the sidebar; no link, address or number the question didn't contain
+    name = clean_ai_text(name, [question], max_len=60, strip_unknown=True)
     if not name or len(name) > 60:
         return
     async with SessionLocal() as session:
@@ -307,14 +311,23 @@ class ChatDocOut(BaseModel):
     ingest_status: str
     ingest_error: str | None
     added_at: datetime
+    hidden_text_ignored: int = 0  # S2: passages left out when the PDF was read
+    suspicious_text_ignored: int = 0
+    n_amendments_proposed: int = 0  # S3: changes this document makes that wait for a person to confirm
 
 
 async def _chat_docs(session: AsyncSession, chat_id: str) -> list[ChatDocOut]:
-    rows = await session.execute(
+    rows = (await session.execute(
         select(Document, ChatDocument.added_at).join(ChatDocument, ChatDocument.document_id == Document.id)
-        .where(ChatDocument.chat_id == chat_id).order_by(ChatDocument.added_at))
+        .where(ChatDocument.chat_id == chat_id).order_by(ChatDocument.added_at))).all()
+    proposed = dict((await session.execute(
+        select(Amendment.source_doc_id, func.count()).where(Amendment.status == "proposed",
+                                                            Amendment.source_doc_id.in_([d.id for d, _ in rows]))
+        .group_by(Amendment.source_doc_id))).all()) if rows else {}
     return [ChatDocOut(id=d.id, title=d.title, filename=d.filename, page_count=d.page_count, file_size=d.file_size,
-                       ingest_status=d.ingest_status, ingest_error=d.ingest_error, added_at=at) for d, at in rows]
+                       ingest_status=d.ingest_status, ingest_error=d.ingest_error, added_at=at,
+                       hidden_text_ignored=d.hidden_text_ignored or 0, suspicious_text_ignored=d.suspicious_text_ignored or 0,
+                       n_amendments_proposed=proposed.get(d.id, 0)) for d, at in rows]
 
 
 async def _link(session: AsyncSession, chat: Chat, results: list[UploadResult]) -> list[UploadResult]:
@@ -336,15 +349,18 @@ async def list_chat_documents(chat_id: str, p: Principal = Depends(get_principal
 async def upload_chat_documents(chat_id: str, bg: BackgroundTasks, files: list[UploadFile] = File(...),
                                 p: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)):
     """Any signed-in user can add PDFs to their own chat; a file already stored is linked, not ingested again.
-    A non-admin user holds at most MAX_USER_DOCUMENTS PDFs / MAX_USER_UPLOAD_MB across all their chats."""
+    A non-admin user holds at most MAX_USER_DOCUMENTS PDFs / MAX_USER_UPLOAD_MB across all their chats, and adds at
+    most MAX_DAILY_UPLOADS new PDFs a day."""
     chat = await _chat(session, chat_id, p)
     items = [(f.filename or "document.pdf", await f.read()) for f in files]
     if p.is_admin or p.user_id is None:
         return await _link(session, chat, await store_uploads(session, bg, items))
     # one upload per user at a time, from counting to linking: two parallel requests can't both fit under the quota
     async with _upload_locks.setdefault(p.user_id, asyncio.Lock()):
-        quota = await user_usage(session, p.user_id)
-        return await _link(session, chat, await store_uploads(session, bg, items, quota=quota))
+        quota = await user_quota(session, p.user_id)
+        results = await store_uploads(session, bg, items, quota=quota)
+        session.add_all(UsageEvent(user_id=p.user_id, kind="upload") for _ in range(quota.added))
+        return await _link(session, chat, results)
 
 
 _upload_locks: dict[str, asyncio.Lock] = {}
@@ -379,6 +395,7 @@ async def ask(chat_id: str, body: AskIn, stream: bool = Query(True), p: Principa
               session: AsyncSession = Depends(get_session)):
     """A new question at the end of the conversation on screen."""
     chat = await _chat(session, chat_id, p)
+    await charge(session, p, "question")  # 429 past the daily limit (S6)
     path = _path(await _messages(session, chat_id), chat.current_message_id)
     last = path[-1] if path else None
     m = await _new_message(session, chat, (last.turn if last else 0) + 1, 1, body, last.id if last else None)
@@ -397,6 +414,7 @@ async def edit_and_resend(chat_id: str, turn: int, body: AskIn, stream: bool = Q
     """Edit a past question (and/or its as-of date), like ChatGPT: the new version of that turn starts a new branch, so
     the turns after it leave the screen. They stay with the old version: switching back to it brings them back."""
     chat = await _chat(session, chat_id, p)
+    await charge(session, p, "question")
     m = await _sibling(session, chat, turn, body)
     return await _respond(m.id, stream)
 
@@ -407,6 +425,7 @@ async def regenerate(chat_id: str, turn: int, stream: bool = Query(True), p: Pri
     """Run a turn's question again as a new version (a new branch from that point, like an edit)."""
     chat = await _chat(session, chat_id, p)
     _, prev = await _on_path(session, chat, turn)
+    await charge(session, p, "question")
     m = await _sibling(session, chat, turn, AskIn(question=prev.question, as_of=prev.as_of, input_mode=prev.input_mode,
                                                       reply_lang=prev.reply_lang))
     return await _respond(m.id, stream, use_cache=False)  # regenerate = re-run, bypass the answer cache

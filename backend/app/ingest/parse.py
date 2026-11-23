@@ -75,6 +75,8 @@ class PDoc:
     clauses: list[PClause]
     ocr_pages: list[int] = field(default_factory=list)  # 1-based pages read with OCR
     unread_pages: list[int] = field(default_factory=list)  # scanned pages that could not be read (no OCR installed)
+    hidden_ignored: int = 0  # S2: text spans a reader cannot see, left out
+    suspicious_ignored: int = 0  # S2: sentences written as instructions to an AI, left out
 
 
 @dataclass
@@ -107,6 +109,97 @@ _SENT_END = re.compile(r"[.;?!](?=\s+[A-Z0-9(“\"‘₹])")
 
 # control characters other than tab/newline/CR (NUL in particular can't be stored in a Postgres text column)
 _CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+# ---------------------------------------------------------------- S2: text a person reading the PDF cannot see
+# A PDF can carry text that is in the text layer but not on the page: white on white, invisible render mode, zero
+# opacity, a 0.5 pt font, or covered by a filled box. A reader never sees it, a parser reads it, and a model given it
+# might obey it ("Ignore previous instructions..."). Such spans are redacted from the in-memory copy before anything
+# is read from the page (lines, tables, title), so they reach neither the index nor the model.
+_TINY_PT = 1.5  # font size below which text is unreadable
+_MIN_CONTRAST = 40  # grey levels (0-255) between the darkest and lightest pixel under a span: less = nothing visible
+_CHECK_DPI = 96
+
+
+def _span_text(span: dict) -> str:
+    return "".join(c["c"] for c in span.get("chars", ()))
+
+
+def _flat(pix: pymupdf.Pixmap, r: pymupdf.Rect, origin: pymupdf.Point, scale: float) -> bool:
+    """True when the rendered page shows (almost) nothing under this span: no ink of a different shade there."""
+    x0, x1 = max(0, int((r.x0 - origin.x) * scale)), min(pix.width, int((r.x1 - origin.x) * scale) + 1)
+    y0, y1 = max(0, int((r.y0 - origin.y) * scale)), min(pix.height, int((r.y1 - origin.y) * scale) + 1)
+    if x1 - x0 < 1 or y1 - y0 < 1:
+        return True
+    buf, stride, n = pix.samples_mv, pix.stride, pix.n
+    lo, hi = 255, 0
+    for y in range(y0, y1):
+        row = bytes(buf[y * stride + x0 * n: y * stride + x1 * n: n])
+        lo, hi = min(lo, min(row)), max(hi, max(row))
+        if hi - lo >= _MIN_CONTRAST:
+            return False
+    return True
+
+
+def _hidden_spans(page: pymupdf.Page) -> list[tuple[pymupdf.Rect, str]]:
+    raw = page.get_text("rawdict", flags=pymupdf.TEXTFLAGS_TEXT)
+    spans = [(sp, pymupdf.Rect(sp["bbox"])) for b in raw["blocks"] for ln in b.get("lines", ()) for sp in ln["spans"]
+             if _span_text(sp).strip()]
+    if not spans:
+        return []
+    images = [pymupdf.Rect(i["bbox"]) for i in page.get_image_info()]
+    pix, out = None, []
+    for sp, r in spans:
+        if sp.get("alpha", 255) == 0:  # invisible render mode (3) or a fully transparent fill
+            # over an image it is a scanned page's OCR layer: the picture shows those words
+            if not any((r & im).get_area() >= 0.5 * max(r.get_area(), 1e-6) for im in images):
+                out.append((r, _span_text(sp)))
+            continue
+        if sp["size"] < _TINY_PT or r.height < 1.0:
+            out.append((r, _span_text(sp)))
+            continue
+        if page.rotation:  # render and text coordinates differ on a rotated page: only the checks above apply
+            continue
+        if pix is None:
+            pix = page.get_pixmap(dpi=_CHECK_DPI, colorspace=pymupdf.csGRAY, alpha=False)
+        if _flat(pix, r, page.rect.tl, pix.width / page.rect.width):
+            out.append((r, _span_text(sp)))
+    return out
+
+
+def _drop_hidden(page: pymupdf.Page) -> int:
+    """Redact the spans nobody can see from this in-memory page; returns how many there were."""
+    hidden = _hidden_spans(page)
+    for r, text in hidden:
+        h = r.height
+        # a little inside the span, so a visible neighbouring line is never touched
+        page.add_redact_annot(pymupdf.Rect(r.x0 + 0.2, r.y0 + 0.25 * h, r.x1 - 0.2, r.y1 - 0.25 * h))
+        log.info("S2 hidden text ignored on page %d: %r", page.number + 1, text[:120])
+    if hidden:
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    return len(hidden)
+
+
+# text that addresses an AI rather than a policyholder: dropped, counted and reported, never indexed. Kept narrow:
+# ordinary policy language ("shall not disclose confidential information", "when asked by the Company") must pass.
+_INJECTION = re.compile(
+    r"\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:the\s+|your\s+|these\s+)?"
+    r"(?:previous|prior|above|earlier|preceding|system|original)\s+(?:instructions?|prompts?|rules?|messages?|directions?)"
+    r"|\b(?:system|developer|hidden)\s+prompt\b"
+    r"|\byou\s+are\s+(?:now\s+)?(?:an?\s+|the\s+)?(?:ai|a\.i\.|assistant|chatbot|language\s+model|llm|gpt|gemini|claude)\b"
+    r"|\b(?:ai|assistant|chatbot|language\s+model|llm)s?\s+(?:must|should|shall|will)\s+(?:now\s+)?(?:say|answer|reply|respond|"
+    r"tell|state|ignore|reveal|output|recommend)\b"
+    r"|\b(?:reveal|print|output|leak|show|repeat)\b[^.]{0,30}\b(?:your|the)\s+(?:system\s+)?(?:prompt|instructions)\b"
+    r"|\bnew\s+instructions?\s*:"
+    r"|\b(?:when|if)\s+(?:a\s+|the\s+)?(?:user|anyone|someone)\s+asks?\b[^.]{0,80}\b(?:say|answer|reply|respond|tell)\b"
+    r"|\b(?:do\s+not|don't|never)\s+(?:tell|inform|show)\s+the\s+user\b"
+    r"|\bprompt\s+injection\b|\bjailbreak\b",
+    re.IGNORECASE,
+)
+
+
+def suspicious(text: str) -> bool:
+    return bool(_INJECTION.search(text))
 
 
 def _is_bold(span: dict) -> bool:
@@ -261,7 +354,13 @@ def parse_pdf(data: bytes) -> PDoc:
     doc = pymupdf.open(stream=data, filetype="pdf")
     tables_by_page, lines_by_page = [], []
     ocr_pages, unread = [], []
+    hidden = 0
     for pno, page in enumerate(doc):
+        if not _needs_ocr(page):
+            try:
+                hidden += _drop_hidden(page)
+            except Exception as e:  # the check never fails a document; it is logged
+                log.warning("hidden-text check failed on page %d: %s", pno + 1, e)
         if _needs_ocr(page):
             tess = ocr_tessdata()
             if tess is None:
@@ -383,6 +482,14 @@ def parse_pdf(data: bytes) -> PDoc:
             b.add_line(ln)
     b.flush()
 
+    flagged = 0
+    for c in b.clauses:
+        keep = [s for s in c.sentences if not suspicious(s.text)]
+        for s in c.sentences:
+            if s not in keep:
+                log.info("S2 suspicious text ignored: %r", s.text[:200])
+        flagged += len(c.sentences) - len(keep)
+        c.sentences = keep
     clauses = [c for c in b.clauses if c.sentences]
     page1 = [ln for ln in lines_by_page[0] if (0, ln.text) not in noise] if lines_by_page else []
     title = _title(page1)
@@ -396,7 +503,7 @@ def parse_pdf(data: bytes) -> PDoc:
         circular_no=circ,
         issue_date=str(dates[0]) if dates else None,
         doc_type=_guess_type(title),
-        clauses=clauses, ocr_pages=ocr_pages, unread_pages=unread)
+        clauses=clauses, ocr_pages=ocr_pages, unread_pages=unread, hidden_ignored=hidden, suspicious_ignored=flagged)
 
 
 def _title(lines: list[_Line]) -> str:

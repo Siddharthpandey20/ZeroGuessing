@@ -51,3 +51,7 @@
   .panel, .panel[data-open], .scrim { transition: none; }
   .spin { animation: none; }
 }
+
+/* S2/S3 notes under a document: what was ignored, what waits for confirmation */
+.docWarn { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; font-size: var(--text-2xs); line-height: 1.35; color: var(--color-conflict-ink); text-decoration: none; }
+a.docWarn:hover { text-decoration: underline; }

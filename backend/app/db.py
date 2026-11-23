@@ -20,6 +20,9 @@ MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_lang varchar(4)",
     "CREATE INDEX IF NOT EXISTS ix_messages_parent_id ON messages (parent_id)",
     "ALTER TABLE chats ADD COLUMN IF NOT EXISTS current_message_id varchar(32)",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS hidden_text_ignored integer NOT NULL DEFAULT 0",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS suspicious_text_ignored integer NOT NULL DEFAULT 0",
+    "ALTER TABLE amendments ADD COLUMN IF NOT EXISTS review_reason text",
     # older chats were linear: each turn follows the latest version of the turn before it
     """UPDATE messages m SET parent_id = (SELECT p.id FROM messages p WHERE p.chat_id = m.chat_id AND p.turn = m.turn - 1
                                          ORDER BY p.version DESC LIMIT 1)
