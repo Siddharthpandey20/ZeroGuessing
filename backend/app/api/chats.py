@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.documents import UploadResult, store_uploads
+from app.api.documents import UploadResult, store_uploads, user_usage
 from app.core.answer import answer_question
 from app.db import SessionLocal, get_session
 from app.llm.gemini import get_llm
@@ -335,10 +335,19 @@ async def list_chat_documents(chat_id: str, p: Principal = Depends(get_principal
 @router.post("/chats/{chat_id}/documents", response_model=list[UploadResult], status_code=202)
 async def upload_chat_documents(chat_id: str, bg: BackgroundTasks, files: list[UploadFile] = File(...),
                                 p: Principal = Depends(get_principal), session: AsyncSession = Depends(get_session)):
-    """Any signed-in user can add PDFs to their own chat; a file already stored is linked, not ingested again."""
+    """Any signed-in user can add PDFs to their own chat; a file already stored is linked, not ingested again.
+    A non-admin user holds at most MAX_USER_DOCUMENTS PDFs / MAX_USER_UPLOAD_MB across all their chats."""
     chat = await _chat(session, chat_id, p)
-    results = await store_uploads(session, bg, [(f.filename or "document.pdf", await f.read()) for f in files])
-    return await _link(session, chat, results)
+    items = [(f.filename or "document.pdf", await f.read()) for f in files]
+    if p.is_admin or p.user_id is None:
+        return await _link(session, chat, await store_uploads(session, bg, items))
+    # one upload per user at a time, from counting to linking: two parallel requests can't both fit under the quota
+    async with _upload_locks.setdefault(p.user_id, asyncio.Lock()):
+        quota = await user_usage(session, p.user_id)
+        return await _link(session, chat, await store_uploads(session, bg, items, quota=quota))
+
+
+_upload_locks: dict[str, asyncio.Lock] = {}
 
 
 @router.post("/chats/{chat_id}/documents/demo", response_model=list[UploadResult], status_code=202)
