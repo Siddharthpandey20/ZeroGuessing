@@ -8,6 +8,7 @@
 <p align="center"><b>Chatbots guess when the documents are silent. ZeroGuess proves every sentence against your PDFs, or says it has no proof.</b></p>
 
 <p align="center">
+  <a href="https://zeroguess-production.up.railway.app/"><img alt="Live demo" src="https://img.shields.io/badge/live%20demo-online-2ea44f?style=flat-square&logo=railway&logoColor=white"></a>
   <a href="#problem-statement-coverage"><img alt="Hackasol 5.0 AIML-02" src="https://img.shields.io/badge/Hackasol%205.0-AIML--02-13343F?style=flat-square"></a>
   <a href="#verified"><img alt="175 tests passing" src="https://img.shields.io/badge/tests-175%20passing-2ea44f?style=flat-square"></a>
   <a href="#results-on-real-policies"><img alt="Answers correct 95.7%" src="https://img.shields.io/badge/answers%20correct-95.7%25-2ea44f?style=flat-square"></a>
@@ -30,6 +31,7 @@
 </p>
 
 <p align="center">
+  <a href="https://zeroguess-production.up.railway.app/"><b>🌐 Live app</b></a> ·
   <a href="docs/media/zeroguess-demo.mp4"><b>▶ Demo video</b></a> ·
   <a href="#one-question-end-to-end"><b>How it works</b></a> ·
   <a href="#results-on-real-policies"><b>Results</b></a> ·
@@ -71,7 +73,9 @@ ZeroGuess moves the burden of proof onto the answer. **Code checks, the model dr
   </tr>
 </table>
 
-<p align="center"><a href="docs/media/zeroguess-demo.mp4"><b>▶ Watch the 5½-minute narrated demo</b></a>, recorded live in the app.</p>
+<p align="center"><a href="https://zeroguess-production.up.railway.app/"><b>🌐 Try it live: zeroguess-production.up.railway.app</b></a></p>
+
+<p align="center"><a href="docs/media/zeroguess-demo.mp4"><b>▶ Watch the 4-minute demo</b></a>: the problem, the idea, and the app running live, narrated and captioned.</p>
 
 ## One question, end to end
 
@@ -193,6 +197,13 @@ Amendment language ("shall be substituted… with effect from…") is found by r
 ## Results on real policies
 
 127 questions with known answers across **ten real Indian health insurance policies**, scored by [`scripts/run_eval.py`](backend/scripts/run_eval.py). **GPT-6 Luna (high) ran through the same pipeline on the same questions, with only the model swapped.**
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/results-dark.svg">
+    <img alt="Bar chart: ZeroGuess vs GPT-6 Luna (high). Answers correct 95.7% vs 90.4%, citations valid 96.5% vs 95.7%, answered 97.4% vs 96.5%, conflicts found 100% vs 50%, false alarms 3.5% vs 4.4%." src="docs/assets/results-light.svg" width="100%">
+  </picture>
+</p>
 
 | Metric | ZeroGuess | GPT-6 Luna (high) | Difference |
 | --- | ---: | ---: | :---: |
