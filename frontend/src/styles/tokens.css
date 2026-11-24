@@ -109,6 +109,7 @@
   --color-conflict-ink: oklch(84% 0.12 78);
   --color-blocked: oklch(68% 0.17 27);
   --color-blocked-soft: oklch(68% 0.17 27 / 0.16);
+  --color-success: oklch(74% 0.15 150);
   --color-ink-a05: oklch(94% 0.008 220 / 0.05);
   --color-ink-a06: oklch(94% 0.008 220 / 0.06);
   --color-ink-a07: oklch(94% 0.008 220 / 0.08);

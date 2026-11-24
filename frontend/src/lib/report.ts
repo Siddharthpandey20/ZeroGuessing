@@ -34,8 +34,11 @@ export interface VerifyResult {
   id?: string
   detail?: string
   fingerprint?: string
-  link?: 'active' | 'revoked' | 'expired' | null
+  link?: 'active' | 'revoked' | 'expired' | 'removed' | null
   payload?: ReportPayload
+  /** the share link is no longer live: the register says genuine or altered, but shows none of the contents */
+  withheld?: boolean
+  withheld_reason?: string
 }
 
 export interface ReportBlock { id: string; fingerprint: string; signature: string; payload: ReportPayload }

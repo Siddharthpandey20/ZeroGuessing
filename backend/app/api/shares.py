@@ -223,15 +223,31 @@ def _norm_id(rid: str) -> str:
 
 
 async def _record(session: AsyncSession, rid: str) -> tuple[Report | None, str | None]:
+    """The registered report and the state of its share link: active | revoked | expired | removed (the chat, and
+    with it the link, was deleted)."""
     rep = await session.get(Report, _norm_id(rid))
     if rep is None:
         return None, None
     share = await session.get(Share, rep.share_token) if rep.share_token else None
-    link = None
-    if share is not None:
-        exp = share.expires_at.replace(tzinfo=share.expires_at.tzinfo or timezone.utc)
-        link = "revoked" if share.revoked else "expired" if exp < datetime.now(timezone.utc) else "active"
-    return rep, link
+    if share is None:
+        return rep, "removed"
+    exp = share.expires_at.replace(tzinfo=share.expires_at.tzinfo or timezone.utc)
+    return rep, "revoked" if share.revoked else "expired" if exp < datetime.now(timezone.utc) else "active"
+
+
+_WITHHELD = {
+    "revoked": "The sender withdrew this report's share link, so its contents are no longer shown here.",
+    "expired": "This report's share link has expired, so its contents are no longer shown here.",
+    "removed": "This report's share link no longer exists, so its contents are no longer shown here.",
+}
+
+
+def _contents(rep: Report, link: str | None) -> dict:
+    """S7: the issued contents only while the share link is live. Afterwards the register still answers whether a
+    copy is genuine or altered, but shows nothing of what it says."""
+    if link == "active":
+        return {"payload": rep.payload, "signature": rep.signature}
+    return {"withheld": True, "withheld_reason": _WITHHELD.get(link or "removed", _WITHHELD["removed"])}
 
 
 @public.get("/public/reports/key")
@@ -248,7 +264,7 @@ async def report_lookup(rid: str, session: AsyncSession = Depends(get_session)):
     if rep is None:
         raise HTTPException(404, "No report with this ID was issued here.")
     return {"status": "genuine" if reports.signature_valid(rep.payload, rep.signature) else "altered",
-            "id": rep.id, "fingerprint": rep.fingerprint, "signature": rep.signature, "link": link, "payload": rep.payload}
+            "id": rep.id, "fingerprint": rep.fingerprint, "link": link, **_contents(rep, link)}
 
 
 @public.post("/public/reports/verify")
@@ -263,8 +279,8 @@ async def report_verify(body: VerifyIn, session: AsyncSession = Depends(get_sess
         return {"status": "altered" if rep else "foreign", "id": payload.get("id"),
                 "detail": "The contents do not match the signature: something was changed after it was issued." if rep
                 else "This report was not issued by this system.",
-                **({"payload": rep.payload, "fingerprint": rep.fingerprint, "link": link} if rep else {})}
+                **({"fingerprint": rep.fingerprint, "link": link, **_contents(rep, link)} if rep else {})}
     rep, link = await _record(session, str(payload.get("id", "")))
     if rep is None or rep.fingerprint != reports.fingerprint(payload):
         return {"status": "altered", "id": payload.get("id"), "detail": "Signed, but not the report registered under this ID."}
-    return {"status": "genuine", "id": rep.id, "fingerprint": rep.fingerprint, "link": link, "payload": rep.payload}
+    return {"status": "genuine", "id": rep.id, "fingerprint": rep.fingerprint, "link": link, **_contents(rep, link)}

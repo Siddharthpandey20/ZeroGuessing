@@ -103,9 +103,13 @@ function Result({ r }: { r: VerifyResult & { via: 'id' | 'file' } }) {
     r.status === 'genuine'
       ? r.via === 'file'
         ? tr('The signature matches and the report is in the register. Every question, answer, quote and document fingerprint is exactly as issued.')
-        : tr('This is the report exactly as issued. If the copy you were sent says anything different, it was changed.')
+        : r.withheld
+          ? tr('A report with this ID was issued here, and its signature is intact.')
+          : tr('This is the report exactly as issued. If the copy you were sent says anything different, it was changed.')
       : r.status === 'altered'
-        ? tr('The contents no longer match the signature: something was changed after it was issued. What was actually issued is shown below; compare it with your copy.')
+        ? r.withheld
+          ? tr('The contents no longer match the signature: something was changed after it was issued.')
+          : tr('The contents no longer match the signature: something was changed after it was issued. What was actually issued is shown below; compare it with your copy.')
         : r.status === 'foreign'
           ? tr('This report was not issued by this system, or its ID was typed wrong.')
           : tr('No signed report was found in this file. Only offline copies downloaded from a share link carry a signature.')
@@ -117,7 +121,7 @@ function Result({ r }: { r: VerifyResult & { via: 'id' | 'file' } }) {
           <p className={styles.statusHead}>{tr(s.head)}</p>
           <p className={styles.statusBody}>{body}</p>
           {r.link && r.link !== 'active' && (
-            <p className={styles.linkNote}>{tr(r.link === 'revoked' ? 'Its share link was withdrawn by the sender. The report itself remains genuine.' : 'Its share link has expired. The report itself remains genuine.')}</p>
+            <p className={styles.linkNote}>{tr(r.link === 'revoked' ? 'Its share link was withdrawn by the sender, so its contents are no longer shown here.' : r.link === 'expired' ? 'Its share link has expired, so its contents are no longer shown here.' : 'Its share link no longer exists, so its contents are no longer shown here.')}</p>
           )}
         </div>
       </div>

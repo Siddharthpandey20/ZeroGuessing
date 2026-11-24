@@ -45,6 +45,9 @@ class Document(Base):
     circular_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     issue_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     source: Mapped[str] = mapped_column(String(16), default="upload")  # corpus|upload
+    # the signed-in (non-admin) user whose chat upload first stored this file; None = the shared library: an admin or
+    # service-key upload, or a demo document. A user's upload never changes the library's rules (S3).
+    uploaded_by: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     storage_key: Mapped[str] = mapped_column(Text)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -53,6 +56,10 @@ class Document(Base):
     ingest_status: Mapped[str] = mapped_column(String(24), default="queued")  # queued|parsing|embedding|indexed|failed
     ingest_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # text left out when the PDF was read (S2): spans a reader can't see (white-on-white, invisible, transparent,
+    # microscopic, covered) and sentences that read as instructions to an AI ("ignore previous instructions...")
+    hidden_text_ignored: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    suspicious_text_ignored: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class Clause(Base):
@@ -115,6 +122,8 @@ class Amendment(Base):
     trigger_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(16), default="proposed")  # proposed|confirmed|rejected
+    # why it was not applied automatically (S3): a person has to confirm it. None = it passed every check.
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -150,7 +159,10 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
+    picture: Mapped[str | None] = mapped_column(Text, nullable=True)  # Google's photo URL, or our /api/profile/photo/...
+    job_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organisation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_key: Mapped[str | None] = mapped_column(Text, nullable=True)  # storage key of an uploaded profile photo
     role: Mapped[str] = mapped_column(String(16), default="viewer")  # admin|viewer
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_sub: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
@@ -243,3 +255,23 @@ class Report(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     signature: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class UsageEvent(Base):
+    """One metered action by a signed-in user (S6): kind = question | camera | upload. Counted per UTC day; kept when
+    a chat is deleted, so deleting chats doesn't reset the day's allowance."""
+    __tablename__ = "usage_events"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class AmendmentDecision(Base):
+    """A signed-in user's own confirm / reject of an amendment (S3). It changes that user's answers only: the
+    amendment's `status` is the shared one (set automatically, or by an admin), which other users keep seeing."""
+    __tablename__ = "amendment_decisions"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    amendment_id: Mapped[str] = mapped_column(ForeignKey("amendments.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # confirmed|rejected
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

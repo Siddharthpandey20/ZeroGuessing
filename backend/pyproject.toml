@@ -25,6 +25,7 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "email-validator>=2.4.0",
     "cryptography>=43",
+    "pillow>=11",
 ]
 
 [project.optional-dependencies]

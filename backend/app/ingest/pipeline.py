@@ -24,13 +24,14 @@ class DuplicateDocument(Exception):
         self.doc = doc
 
 
-async def create_document(session: AsyncSession, data: bytes, filename: str, source: str = "upload") -> tuple[Document, Job]:
+async def create_document(session: AsyncSession, data: bytes, filename: str, source: str = "upload",
+                          uploaded_by: str | None = None) -> tuple[Document, Job]:
     sha = hashlib.sha256(data).hexdigest()
     existing = (await session.execute(select(Document).where(Document.sha256 == sha))).scalar_one_or_none()
     if existing:
         raise DuplicateDocument(existing)
     doc = Document(title=filename, filename=filename, sha256=sha, source=source, file_size=len(data),
-                   storage_key=f"documents/{sha}.pdf")
+                   storage_key=f"documents/{sha}.pdf", uploaded_by=uploaded_by)
     get_storage().put(doc.storage_key, data)
     session.add(doc)
     await session.flush()
@@ -110,7 +111,12 @@ async def _run_ingest(doc_id: str, job_id: str | None = None) -> None:
 
             data = get_storage().get(doc.storage_key)
             parsed = await asyncio.to_thread(parse_pdf, data)
+            # S2: what was left out is told to the user (documents list, chat documents panel)
+            doc.hidden_text_ignored, doc.suspicious_text_ignored = parsed.hidden_ignored, parsed.suspicious_ignored
             if not parsed.clauses:
+                if parsed.hidden_ignored or parsed.suspicious_ignored:
+                    raise ValueError("No readable text was found in this PDF: all its text was hidden from view or "
+                                     "written as instructions to an AI, and was ignored.")
                 if parsed.unread_pages:
                     raise ValueError("This PDF is a scan (pages are images) and OCR is not installed on this server, "
                                      "so it can't be read. Install Tesseract, or upload a PDF with a text layer.")
@@ -168,6 +174,8 @@ async def _run_ingest(doc_id: str, job_id: str | None = None) -> None:
                 notes.append(f"ocr_pages={parsed.ocr_pages}")
             if parsed.unread_pages:
                 notes.append(f"unread_scanned_pages={parsed.unread_pages}")
+            if parsed.hidden_ignored or parsed.suspicious_ignored:
+                notes.append(f"ignored hidden={parsed.hidden_ignored} suspicious={parsed.suspicious_ignored}")
             try:
                 from app.core.amendments import extract_for_document, resolve_targets
 

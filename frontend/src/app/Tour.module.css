@@ -1,0 +1,46 @@
+/* First-run tour: the page is shaded and blurred everywhere except a cut-out around the feature being shown. */
+.tour { position: fixed; inset: 0; z-index: 1000; pointer-events: none; }
+
+/* four panels around the cut-out (one full panel for the welcome card); they also catch clicks meant for the page */
+.shade {
+  position: fixed; pointer-events: auto;
+  background: oklch(18% 0.03 224 / 0.58);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  transition: left var(--dur-short) var(--ease-out), top var(--dur-short) var(--ease-out),
+    width var(--dur-short) var(--ease-out), height var(--dur-short) var(--ease-out);
+}
+.block { position: fixed; pointer-events: auto; cursor: default; }
+
+/* the highlight around the feature */
+.ring {
+  position: fixed; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 7px oklch(92.5% 0.175 131 / 0.28), 0 0 32px 6px oklch(92.5% 0.175 131 / 0.35);
+  transition: left var(--dur-short) var(--ease-out), top var(--dur-short) var(--ease-out),
+    width var(--dur-short) var(--ease-out), height var(--dur-short) var(--ease-out);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% { box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 10px oklch(92.5% 0.175 131 / 0.16), 0 0 40px 10px oklch(92.5% 0.175 131 / 0.28); }
+}
+
+.card {
+  position: fixed; pointer-events: auto; width: min(360px, calc(100vw - 24px));
+  display: grid; gap: var(--space-sm); padding: var(--space-md) var(--space-md) var(--space-sm);
+  background: var(--color-paper-2); color: var(--color-ink);
+  border: var(--rule-hair) solid var(--color-rule-strong); border-radius: var(--radius-card); box-shadow: var(--shadow-float);
+  transition: top var(--dur-short) var(--ease-out), left var(--dur-short) var(--ease-out);
+}
+.card:focus-within { outline: none; }
+.meta { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-2xs); color: var(--color-muted); font-weight: 600; }
+.dots { display: flex; gap: 4px; }
+.dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-rule-strong); transition: width var(--dur-short) var(--ease-out), background var(--dur-short); }
+.dots i[data-on] { width: 14px; border-radius: 3px; background: var(--color-ink); }
+.title { font-size: var(--text-lg); line-height: 1.25; font-weight: 600; letter-spacing: var(--tracking-title); }
+.body { font-size: var(--text-sm); line-height: 1.55; color: var(--color-ink-2); }
+.actions { display: flex; align-items: center; gap: var(--space-xs); padding-top: var(--space-2xs); }
+.spacer { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shade, .ring, .card, .dots i { transition: none; }
+  .ring { animation: none; }
+}

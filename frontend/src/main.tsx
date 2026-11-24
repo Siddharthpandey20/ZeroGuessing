@@ -14,6 +14,7 @@ const Workspace = lazy(() => import('./app/Workspace'))
 const Ask = lazy(() => import('./app/Ask'))
 const Library = lazy(() => import('./app/Library'))
 const Alerts = lazy(() => import('./app/Alerts'))
+const Profile = lazy(() => import('./app/Profile'))
 const SharedView = lazy(() => import('./routes/SharedView'))
 const VerifyReport = lazy(() => import('./routes/VerifyReport'))
 const NotFound = lazy(() => import('./routes/NotFound'))
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
       { path: 'library', element: s(<Library />) },
       { path: 'library/:docId', element: s(<Library />) },
       { path: 'alerts', element: s(<Alerts />) },
+      { path: 'profile', element: s(<Profile />) },
     ],
   },
   { path: '*', element: s(<NotFound />) },

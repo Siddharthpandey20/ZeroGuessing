@@ -23,7 +23,7 @@
 .danger:hover { background: var(--color-blocked-deep); }
 
 /* ---------- thread ---------- */
-.thread { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: var(--color-paper); }
+.thread { position: relative; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: var(--color-paper); }
 .threadTop { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) var(--space-lg); border-bottom: var(--rule-hair) solid var(--color-rule); min-height: 53px; }
 .railToggle { display: none; }
 .chatTitle { min-width: 0; font-family: var(--font-body); font-size: var(--text-sm); font-weight: 600; color: var(--color-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -114,3 +114,6 @@ h1.chatTitle:only-of-type { flex: 1; }
 @keyframes arrive { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .arrive { animation: none; } }
 .voiceProblem { margin: var(--space-2xs) 0 0; font: var(--text-xs)/1.4 var(--font-body); color: var(--color-ink-2); }
+
+/* drag-and-drop: PDFs dropped anywhere on the conversation are added to this chat */
+.dropOverlay { position: absolute; inset: 12px; z-index: var(--z-modal); display: grid; place-content: center; justify-items: center; gap: var(--space-xs, 8px); border-radius: var(--radius-panel); border: 2px dashed var(--color-ink-2); background: var(--color-paper-a86); backdrop-filter: blur(4px); font-size: var(--text-lg, 1.125rem); font-weight: 560; color: var(--color-ink); text-align: center; padding: 16px; pointer-events: none; }

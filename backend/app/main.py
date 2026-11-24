@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api import alerts, amendments, auth as auth_api, camera, chats, documents, shares
+from app.api import alerts, amendments, auth as auth_api, camera, chats, documents, profile, shares
 from app.config import get_settings
 from app.db import SessionLocal, engine, init_db
 from app.ingest.pipeline import resume_interrupted
@@ -42,7 +42,7 @@ app.add_middleware(
 )
 
 auth = [Depends(require_api_key)]
-for r in (documents.router, chats.router, amendments.router, alerts.router, shares.router, camera.router):
+for r in (documents.router, chats.router, amendments.router, alerts.router, shares.router, camera.router, profile.router):
     app.include_router(r, prefix="/api", dependencies=auth)
 app.include_router(shares.public)  # token-protected, no API key
 app.include_router(auth_router)  # admin-key browser session (early frontend build)

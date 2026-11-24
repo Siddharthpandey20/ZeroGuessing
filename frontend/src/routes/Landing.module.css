@@ -116,6 +116,22 @@
 .closeH { font-size: var(--text-display); line-height: var(--leading-display); letter-spacing: var(--tracking-display); font-weight: 560; }
 .closeBody { font-size: var(--text-lead); color: var(--color-ink-2); max-width: 44ch; }
 /* minmax(0, 1fr): the wordmark sizes itself to its container, so the column must not grow to fit the mark first */
+/* ================= FAQ ================= */
+/* the FAQ follows the closing call to action closely: a short gap, not a full section gap */
+.close:has(+ .indexBar) { padding-bottom: var(--space-lg); }
+.close + .indexBar { margin-top: var(--space-xl); }
+.faq { max-width: var(--container); margin-inline: auto; padding: 0 var(--gutter) var(--section-gap); display: grid; gap: var(--space-lg); }
+.faqH { font-size: var(--text-section); line-height: 1.05; letter-spacing: var(--tracking-display); font-weight: 560; }
+.faqList { border-top: var(--rule-hair) solid var(--color-rule-strong); width: 100%; }
+.faqItem { border-bottom: var(--rule-hair) solid var(--color-rule-strong); }
+.faqQ { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-md); padding: var(--space-md) 0; font-size: var(--text-title); font-weight: 520; color: var(--color-ink); }
+.faqQ::-webkit-details-marker { display: none; }
+.faqQ::after { content: "+"; flex: none; font-weight: 400; color: var(--color-ink-2); transition: transform 200ms var(--ease-out); }
+.faqItem[open] .faqQ::after { transform: rotate(45deg); }
+.faqQ:hover { color: var(--color-ink-2); }
+.faqQ:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 4px; border-radius: 4px; }
+.faqA { padding: 0 0 var(--space-md); font-size: var(--text-lead); line-height: 1.55; color: var(--color-ink-2); padding-right: var(--space-2xl); }
+
 .footer { max-width: var(--container); margin-inline: auto; padding: 0 var(--gutter) var(--space-xl); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-lg); }
 .footMark { border-top: var(--rule-hair) solid var(--color-rule-strong); padding-top: var(--space-xl); }
 .footRow { display: flex; flex-wrap: wrap; gap: var(--space-md) var(--space-xl); align-items: center; font-size: var(--text-sm); color: var(--color-ink-2); }

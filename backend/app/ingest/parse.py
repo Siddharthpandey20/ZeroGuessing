@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
+import numpy as np
 import pymupdf
 
 from app.core.normalise import extract_values
@@ -75,6 +76,8 @@ class PDoc:
     clauses: list[PClause]
     ocr_pages: list[int] = field(default_factory=list)  # 1-based pages read with OCR
     unread_pages: list[int] = field(default_factory=list)  # scanned pages that could not be read (no OCR installed)
+    hidden_ignored: int = 0  # S2: text spans a reader cannot see, left out
+    suspicious_ignored: int = 0  # S2: sentences written as instructions to an AI, left out
 
 
 @dataclass
@@ -107,6 +110,223 @@ _SENT_END = re.compile(r"[.;?!](?=\s+[A-Z0-9(“\"‘₹])")
 
 # control characters other than tab/newline/CR (NUL in particular can't be stored in a Postgres text column)
 _CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+# ---------------------------------------------------------------- S2: text a person reading the PDF cannot see
+# A PDF can carry text that is in the text layer but not on the page: white on white, invisible render mode, zero
+# opacity, a microscopic font, covered by a filled box, or white text laid over a visible line. A reader never sees
+# it, a parser reads it, and a model given it might obey it. Such text is redacted from the in-memory copy before
+# anything is read from the page (lines, tables, title), so it reaches neither the index nor the model.
+#
+# The test is per character and asks the rendered page: the page is drawn twice, as it is and with all its text
+# removed. A character is visible when its own box differs between the two (its glyph put ink there). Where text
+# overlaps other text (white words laid over a visible line), the difference could be the other text's ink, so the
+# character must also stand out from the background under it and not be painted over by a later opaque shape.
+_TINY_PT = 3.0  # font size below which text is unreadable on screen or paper
+_MIN_INK = 32  # colour levels (0-255, any channel) for a pixel to count as ink
+_FAINT_INK = 12  # ...for faint text (light grey), whose anti-aliased strokes stay below _MIN_INK
+_MIN_CONTRAST = 26  # text closer than this to the colour under it is not visible (white on white, 0.9 grey on white)
+_CHECK_DPI = 110
+_MIN_RUN = 3  # an invisible run inside visible text is dropped from 3 characters (a lone dot is never dropped)
+
+
+def _rgb(color: tuple | None, n: int) -> np.ndarray:
+    c = [float(x) for x in (color or (0,))]
+    if n == 1 or len(c) == 1:
+        rgb = [c[0]] * 3
+    elif n == 4 or len(c) == 4:
+        rgb = [(1 - x) * (1 - c[3]) for x in c[:3]]
+    else:
+        rgb = c[:3]
+    return np.array(rgb) * 255
+
+
+Box = tuple[float, float, float, float]
+
+
+def _area(r: Box) -> float:
+    return max(0.0, r[2] - r[0]) * max(0.0, r[3] - r[1])
+
+
+class _Canvas:
+    """The page as drawn and without its text (`b`), and where the two differ (an integral image of ink pixels)."""
+
+    def __init__(self, page: pymupdf.Page, bare: pymupdf.Page):
+        a, b = (p.get_pixmap(dpi=_CHECK_DPI, colorspace=pymupdf.csRGB, alpha=False) for p in (page, bare))
+        self.b = np.frombuffer(b.samples, np.uint8).reshape(b.height, b.width, 3).astype(np.int16)
+        diff = np.abs(np.frombuffer(a.samples, np.uint8).reshape(a.height, a.width, 3).astype(np.int16) - self.b)
+        d = diff.max(axis=2)
+        self.sat = np.pad((d >= _MIN_INK).astype(np.int32).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+        self.faint = np.pad((d >= _FAINT_INK).astype(np.int32).cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+        self.h, self.w = d.shape
+        # text coordinates are on the unrotated page; the picture is of the page as shown
+        self.m = page.rotation_matrix * pymupdf.Matrix(_CHECK_DPI / 72, _CHECK_DPI / 72)
+
+    def box(self, r: Box) -> tuple[int, int, int, int] | None:
+        m = self.m
+        xs = (m.a * r[0] + m.c * r[1] + m.e, m.a * r[2] + m.c * r[3] + m.e)
+        ys = (m.b * r[0] + m.d * r[1] + m.f, m.b * r[2] + m.d * r[3] + m.f)
+        x0, y0 = max(0, int(min(xs))), max(0, int(min(ys)))
+        x1, y1 = min(self.w, int(np.ceil(max(xs)))), min(self.h, int(np.ceil(max(ys))))
+        return (x0, y0, x1, y1) if x1 > x0 and y1 > y0 else None
+
+    def ink(self, r: Box, faint: bool = False) -> int:
+        """Pixels inside r where text put ink (0 when r is off the page)."""
+        bx = self.box(r)
+        if bx is None:
+            return 0
+        x0, y0, x1, y1 = bx
+        s = self.faint if faint else self.sat
+        return int(s[y1, x1] - s[y0, x1] - s[y1, x0] + s[y0, x0])
+
+    def background(self, r: Box) -> np.ndarray | None:
+        bx = self.box(r)
+        return None if bx is None else np.median(self.b[bx[1]:bx[3], bx[0]:bx[2]].reshape(-1, 3), axis=0)
+
+    def busy(self, r: Box) -> bool:
+        """Something other than text is drawn under r with visible detail (a scan's picture of words)."""
+        bx = self.box(r)
+        if bx is None:
+            return False
+        patch = self.b[bx[1]:bx[3], bx[0]:bx[2]].reshape(-1, 3)
+        return int((patch.max(axis=0) - patch.min(axis=0)).max()) >= 2 * _MIN_INK
+
+
+def _inner(r: Box) -> Box:
+    """The middle of a glyph box: a neighbour's anti-aliased edge must not count as this glyph's ink."""
+    dx, dy = 0.15 * (r[2] - r[0]), 0.05 * (r[3] - r[1])
+    return (r[0] + dx, r[1] + dy, r[2] - dx, r[3] - dy)
+
+
+def _on(r: Box, page: Box) -> bool:
+    return r[0] < page[2] and r[2] > page[0] and r[1] < page[3] and r[3] > page[1]
+
+
+def _overlaps(r: Box, boxes: np.ndarray, frac: float) -> np.ndarray:
+    """Indexes of `boxes` covering more than `frac` of r."""
+    if not len(boxes):
+        return np.zeros(0, int)
+    w = np.minimum(boxes[:, 2], r[2]) - np.maximum(boxes[:, 0], r[0])
+    h = np.minimum(boxes[:, 3], r[3]) - np.maximum(boxes[:, 1], r[1])
+    return np.nonzero((w > 0) & (h > 0) & (w * h > frac * max(_area(r), 1e-6)))[0]
+
+
+def _hidden_runs(page: pymupdf.Page, bare: pymupdf.Page) -> list[tuple[pymupdf.Rect, str]]:
+    # only words can carry an instruction: punctuation, rules and form lines (____) are neither checked nor dropped
+    spans = [s for s in page.get_texttrace() if any(chr(c[0]).isalnum() for c in s["chars"])]
+    if not spans:
+        return []
+    cv = _Canvas(page, bare)
+    pr = page.rect * page.derotation_matrix
+    pr = (pr.x0, pr.y0, pr.x1, pr.y1)  # off the page: not read at all, so nothing to drop
+    images = np.array([tuple(i["bbox"]) for i in page.get_image_info()], float).reshape(-1, 4)
+    boxes = np.array([s["bbox"] for s in spans], float)
+    drawings = None  # read only when text overlaps text
+    out: list[tuple[pymupdf.Rect, str]] = []
+    for i, sp in enumerate(spans):
+        chars = [(chr(c[0]), tuple(c[3])) for c in sp["chars"]]
+        r = tuple(boxes[i])
+        if not _on(r, pr):
+            continue
+        text = "".join(c for c, _ in chars)
+        if sp["type"] == 3 or sp["opacity"] == 0:  # invisible render mode or a fully transparent fill
+            # a scanner's OCR layer lies over the picture of the same words; over a blank image it is just hidden
+            if not (_overlaps(r, images, 0.5).size and cv.busy(r)):
+                out.append((pymupdf.Rect(r), text))
+            continue
+        if sp["size"] < _TINY_PT or r[3] - r[1] < 1.0:
+            out.append((pymupdf.Rect(r), text))
+            continue
+        near = _overlaps(r, boxes, 0)
+        others = boxes[near[near != i]]
+        color = _rgb(sp["color"], sp["colorspace"])
+        hidden: list[bool | None] = []
+        for ch, cr in chars:
+            if not ch.isalnum() or not _on(cr, pr):
+                hidden.append(None)  # neither makes nor breaks a run
+                continue
+            core = _inner(cr)
+            alone = not len(others) or not _overlaps(core, others, 0.3).size
+            if alone and cv.ink(core) >= 2:
+                hidden.append(False)
+                continue
+            bg = cv.background(core)
+            if bg is None or np.abs(color - bg).max() < _MIN_CONTRAST:  # no colour of its own against what's under it
+                hidden.append(True)
+                continue
+            if alone:  # faint but its own colour: anti-aliased light text
+                hidden.append(cv.ink(core, faint=True) < 2)
+                continue
+            if drawings is None:
+                drawings = [(d["seqno"], pymupdf.Rect(d["rect"])) for d in page.get_drawings()
+                            if d.get("fill") is not None and (d.get("fill_opacity") or 1) >= 0.95]
+            hidden.append(any(seq > sp["seqno"] and dr.contains(pymupdf.Rect(core)) for seq, dr in drawings))
+        solid = [h for h in hidden if h is not None]
+        if solid and all(solid):
+            out.append((pymupdf.Rect(r), text))
+            continue
+        run: list[int] = []
+        for k, h in enumerate([*hidden, False]):
+            if h is None:
+                continue
+            if h:
+                run.append(k)
+                continue
+            if len(run) >= _MIN_RUN:
+                rr = pymupdf.Rect(chars[run[0]][1])
+                for q in run[1:]:
+                    rr |= pymupdf.Rect(chars[q][1])
+                out.append((rr, "".join(c for c, _ in chars[run[0]:run[-1] + 1])))
+            run = []
+    return out
+
+
+def _drop_hidden(page: pymupdf.Page, bare: pymupdf.Page) -> int:
+    """Redact the text nobody can see from this in-memory page; returns how many runs there were. `bare` is the same
+    page from a second copy of the file: its text is removed to draw the page without text."""
+    bare.add_redact_annot(bare.rect * bare.derotation_matrix)  # redactions take unrotated coordinates
+    bare.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    hidden = _hidden_runs(page, bare)
+    for r, text in hidden:
+        h = r.height
+        # a little inside the run, so a visible neighbouring line is never touched
+        page.add_redact_annot(pymupdf.Rect(r.x0 + 0.2, r.y0 + 0.25 * h, r.x1 - 0.2, r.y1 - 0.25 * h))
+        log.info("S2 hidden text ignored on page %d: %r", page.number + 1, text[:120])
+    if hidden:
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+    return len(hidden)
+
+
+# text that addresses an AI rather than a policyholder: dropped, counted and reported, never indexed. Kept narrow:
+# ordinary policy language ("shall not disclose confidential information", "when asked by the Company") must pass.
+_AI = r"(?:ai|a\.i\.|assistant|chatbot|bot|language\s+model|llm|model|gpt|gemini|claude)"
+_INJECTION = re.compile(
+    # "ignore previous instructions" - but not a circular's "disregard the earlier instructions issued vide ..."
+    r"\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:the\s+|your\s+|these\s+)?"
+    r"(?:previous|prior|above|earlier|preceding|system|original)\s+(?:instructions?|prompts?|rules?|messages?|directions?)\b"
+    r"(?!\s+(?:issued|vide|contained|dated|under|in\s+this\s+regard|on\s+the\s+subject|of\s+the\s+(?:bank|company|reserve)))"
+    r"|\b(?:system|developer|hidden)\s+prompt\b"
+    rf"|\byou\s+are\s+(?:now\s+)?(?:an?\s+|the\s+)?{_AI}\b"
+    # "the AI must say ..." (not "the chatbot shall respond to customer queries", or an Assistant Manager who shall respond)
+    r"|\b(?:the\s+|an?\s+)?(?:ai|a\.i\.|language\s+model|llm)s?\s+(?:must|should|shall|will)\s+(?:now\s+|always\s+)?"
+    r"(?:say|tell|ignore|reveal|output|recommend)\b"
+    # text addressed to a model: "Note for the assistant:", "Important for automated readers", "Dear AI"
+    rf"|\b(?:note|message|instructions?|attention|reminder|hint)s?\s+(?:to|for)\s+(?:the\s+|any\s+|an?\s+)?{_AI}s?\b"
+    r"|\bautomated\s+(?:readers?|assistants?|agents?)\b"
+    rf"|\b(?:dear|hey|hello)\s+{_AI}\b"
+    r"|\b(?:reveal|print|output|leak|show|repeat)\b[^.]{0,30}\b(?:your|the)\s+(?:system\s+)?(?:prompt|instructions)\b"
+    r"|\bnew\s+instructions?\s*:"
+    # "When a user asks about X, say Y" - an order to whoever answers, not "if a user asks ..., the lender shall respond"
+    r"|\b(?:when|if)\s+(?:a\s+|the\s+)?(?:user|anyone|someone)\s+asks?\b[^.]{0,80}?(?:,|\bthen\b)\s*(?:then\s+)?"
+    r"(?:always\s+|just\s+|simply\s+)?(?:say|answer|reply|respond|tell)\b"
+    r"|\b(?:do\s+not|don't|never)\s+(?:tell|inform|show)\s+the\s+user\b"
+    r"|\bprompt\s+injection\b|\bjailbreak\b",
+    re.IGNORECASE,
+)
+
+
+def suspicious(text: str) -> bool:
+    return bool(_INJECTION.search(text))
 
 
 def _is_bold(span: dict) -> bool:
@@ -261,7 +481,14 @@ def parse_pdf(data: bytes) -> PDoc:
     doc = pymupdf.open(stream=data, filetype="pdf")
     tables_by_page, lines_by_page = [], []
     ocr_pages, unread = [], []
+    hidden = 0
+    bare_doc = pymupdf.open(stream=data, filetype="pdf")  # S2: the same pages, drawn without their text
     for pno, page in enumerate(doc):
+        if not _needs_ocr(page):
+            try:
+                hidden += _drop_hidden(page, bare_doc[pno])
+            except Exception as e:  # the check never fails a document; it is logged
+                log.warning("hidden-text check failed on page %d: %s", pno + 1, e)
         if _needs_ocr(page):
             tess = ocr_tessdata()
             if tess is None:
@@ -383,6 +610,14 @@ def parse_pdf(data: bytes) -> PDoc:
             b.add_line(ln)
     b.flush()
 
+    flagged = 0
+    for c in b.clauses:
+        keep = [s for s in c.sentences if not suspicious(s.text)]
+        for s in c.sentences:
+            if s not in keep:
+                log.info("S2 suspicious text ignored: %r", s.text[:200])
+        flagged += len(c.sentences) - len(keep)
+        c.sentences = keep
     clauses = [c for c in b.clauses if c.sentences]
     page1 = [ln for ln in lines_by_page[0] if (0, ln.text) not in noise] if lines_by_page else []
     title = _title(page1)
@@ -396,7 +631,7 @@ def parse_pdf(data: bytes) -> PDoc:
         circular_no=circ,
         issue_date=str(dates[0]) if dates else None,
         doc_type=_guess_type(title),
-        clauses=clauses, ocr_pages=ocr_pages, unread_pages=unread)
+        clauses=clauses, ocr_pages=ocr_pages, unread_pages=unread, hidden_ignored=hidden, suspicious_ignored=flagged)
 
 
 def _title(lines: list[_Line]) -> str:

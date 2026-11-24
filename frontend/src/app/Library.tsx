@@ -111,7 +111,7 @@ export default function Library() {
 
         {proposed.length > 0 && (
           <div className={styles.review}>
-            <p><strong>{proposed.length} {proposed.length === 1 ? 'amendment needs' : 'amendments need'} a person to confirm.</strong> They are not applied until confirmed.</p>
+            <p><strong>{proposed.length} {proposed.length === 1 ? 'amendment needs' : 'amendments need'} a person to confirm.</strong> They are not applied until confirmed. A document may only change another from the same issuer, and only a clause that exists: check each one against the original before confirming.</p>
             <ul className={styles.reviewList}>
               {proposed.map((a) => <AmendmentRow key={a.id} a={a} admin={isAdmin} />)}
             </ul>
@@ -188,8 +188,9 @@ function AmendmentRow({ a, admin }: { a: Amendment; admin: boolean }) {
           {a.confidence !== null ? `, extraction confidence ${Math.round(a.confidence * 100)}%` : ''}
         </span>
         {a.new_text && <span className={styles.amendNew}>“{a.new_text}”</span>}
+        {a.status === 'proposed' && a.review_reason && <span className={styles.amendWhy}>Not applied automatically: {a.review_reason}.</span>}
       </div>
-      {admin && a.status === 'proposed' && (
+      {(a.can_decide ?? admin) && a.status === 'proposed' && (
         <div className={styles.amendActions}>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => m.mutate('rejected')} disabled={m.isPending}><X size={14} aria-hidden="true" /> Reject</button>
           <button type="button" className="btn btn-ink btn-sm" onClick={() => m.mutate('confirmed')} disabled={m.isPending}><Check size={14} aria-hidden="true" /> Confirm</button>
@@ -226,6 +227,15 @@ function DocDetail({ doc, admin, amendments, onClose }: { doc: DocumentRow; admi
           <div><dt>Size</dt><dd className="tnum">{doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}, {(doc.file_size / 1024).toFixed(0)} KB</dd></div>
         </dl>
         {doc.ingest_error && <p className={styles.dError}>{doc.ingest_error}</p>}
+        {(doc.hidden_text_ignored || doc.suspicious_text_ignored) ? (
+          <p className={styles.dNote}>
+            Some text in this PDF was ignored when it was read:
+            {doc.hidden_text_ignored ? ` ${doc.hidden_text_ignored} ${doc.hidden_text_ignored === 1 ? 'passage' : 'passages'} a reader can't see (white or invisible text, a microscopic font, or text covered over)` : ''}
+            {doc.hidden_text_ignored && doc.suspicious_text_ignored ? ';' : ''}
+            {doc.suspicious_text_ignored ? ` ${doc.suspicious_text_ignored} ${doc.suspicious_text_ignored === 1 ? 'sentence' : 'sentences'} written as instructions to an AI` : ''}.
+            {' '}Answers never use it.
+          </p>
+        ) : null}
 
         {admin && (
           <div className={styles.dActions}>

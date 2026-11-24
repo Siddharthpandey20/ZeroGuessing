@@ -1,0 +1,12 @@
+{
+  "run": "20261124-gpt6-luna-high",
+  "model": "GPT-6 Luna (high)",
+  "questions": 115,
+  "n": 115,
+  "answer_correctness": 0.904,
+  "citation_validity": 0.957,
+  "over_abstention": 0.035,
+  "contradiction_recall": 0.5,
+  "false_conflict_rate": 0.044,
+  "first_answer_p50_ms": 12150
+}
