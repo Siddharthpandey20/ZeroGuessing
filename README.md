@@ -75,7 +75,7 @@ ZeroGuess moves the burden of proof onto the answer. **Code checks, the model dr
 
 <p align="center"><a href="https://zeroguess-production.up.railway.app/"><b>🌐 Try it live: zeroguess-production.up.railway.app</b></a></p>
 
-<p align="center"><a href="docs/media/zeroguess-demo.mp4"><b>▶ Watch the 4-minute demo</b></a>: the problem, the idea, and the app running live, narrated and captioned.</p>
+<p align="center"><a href="https://drive.google.com/file/d/1cTMxMfCiDXX6Jdb44rEvyx9vmzfnlZAr/view?usp=sharing"><b>▶ Watch the 4-minute demo</b></a>: the problem, the idea, and the app running live, narrated and captioned.</p>
 
 ## One question, end to end
 
