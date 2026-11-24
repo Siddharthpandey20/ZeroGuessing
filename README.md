@@ -32,7 +32,7 @@
 
 <p align="center">
   <a href="https://zeroguess-production.up.railway.app/"><b>🌐 Live app</b></a> ·
-  <a href="docs/media/zeroguess-demo.mp4"><b>▶ Demo video</b></a> ·
+  <a href="https://drive.google.com/file/d/1cTMxMfCiDXX6Jdb44rEvyx9vmzfnlZAr/view?usp=sharing"><b>▶ Demo video</b></a> ·
   <a href="#one-question-end-to-end"><b>How it works</b></a> ·
   <a href="#results-on-real-policies"><b>Results</b></a> ·
   <a href="#problem-statement-coverage"><b>Coverage</b></a> ·
@@ -75,7 +75,7 @@ ZeroGuess moves the burden of proof onto the answer. **Code checks, the model dr
 
 <p align="center"><a href="https://zeroguess-production.up.railway.app/"><b>🌐 Try it live: zeroguess-production.up.railway.app</b></a></p>
 
-<p align="center"><a href="docs/media/zeroguess-demo.mp4"><b>▶ Watch the 4-minute demo</b></a>: the problem, the idea, and the app running live, narrated and captioned.</p>
+<p align="center"><a href="https://drive.google.com/file/d/1cTMxMfCiDXX6Jdb44rEvyx9vmzfnlZAr/view?usp=sharing"><b>▶ Watch the 4-minute demo</b></a>: the problem, the idea, and the app running live, narrated and captioned.</p>
 
 ## One question, end to end
 
@@ -360,7 +360,7 @@ Full reference: [`backend/README.md`](backend/README.md) and `/docs` on a runnin
 | Backend | 175 tests, fake model, real Postgres: normaliser, parser, auth and refresh rotation, chat isolation, amendment chains, contradictions, EMI, Hindi, shares, profile | [`backend/tests`](backend/tests) |
 | Answer quality on real policies | 127 scored questions against GPT-6 Luna (high) | [`backend/eval/results`](backend/eval/results) |
 | The demo corpus | Planted chain, conflicts, look-alikes and gaps with known answers | [`FACTS.md`](backend/corpus/FACTS.md) |
-| The app end to end | A narrated run of every feature, recorded live | [demo video](docs/media/zeroguess-demo.mp4) |
+| The app end to end | A narrated run of every feature, recorded live | [demo video](https://drive.google.com/file/d/1cTMxMfCiDXX6Jdb44rEvyx9vmzfnlZAr/view?usp=sharing) |
 
 ## Limits
 
