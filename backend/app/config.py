@@ -1,6 +1,8 @@
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -103,6 +105,17 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="after")
     @classmethod
     def _asyncpg_url(cls, v: str) -> str:
+        # a pasted value with stray spaces or quotes, or an empty reference: fall back to the PG* variables
+        v = v.strip().strip("\"'").strip()
+        if not v and os.environ.get("PGHOST"):
+            v = (f"postgresql://{os.environ.get('PGUSER', 'postgres')}:{os.environ.get('PGPASSWORD', '')}"
+                 f"@{os.environ['PGHOST']}:{os.environ.get('PGPORT', '5432')}/{os.environ.get('PGDATABASE', 'postgres')}")
+        # a generated password with @ # / ? in it breaks URL parsing: percent-encode it (idempotent)
+        scheme, sep, rest = v.partition("://")
+        userinfo, at, hostpart = rest.rpartition("@")
+        if sep and at and ":" in userinfo:
+            user, _, pw = userinfo.partition(":")
+            v = f"{scheme}://{user}:{quote(unquote(pw), safe='')}@{hostpart}"
         # Railway/Render/Heroku hand out postgres:// or postgresql:// URLs; SQLAlchemy async needs the asyncpg
         # driver, and asyncpg takes ssl=require instead of libpq's sslmode=require
         for prefix in ("postgres://", "postgresql://"):

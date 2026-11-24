@@ -880,7 +880,7 @@ backend/
   tests/
 ```
 
-### L.3 Build order (backend), with progress tracked in `docs/PROGRESS.md`
+### L.3 Build order (backend)
 1. Scaffold: config, DB, models, health, auth, docker compose
 2. `normalise` + unit tests
 3. Gemini client (JSON + embeddings + retries)
